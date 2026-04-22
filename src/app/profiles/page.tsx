@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 type ProfileListItem = {
   id: string;
@@ -55,6 +56,7 @@ type ScoreResponse = {
 };
 
 export default function ProfilesPage() {
+  const router = useRouter();
   const [profiles, setProfiles] = useState<ProfileListItem[]>([]);
   const [pools, setPools] = useState<Pool[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
@@ -64,21 +66,18 @@ export default function ProfilesPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadInitial() {
-      try {
-        const [profRes, poolRes] = await Promise.all([
-          fetch('/api/profiles').then((r) => r.json()),
-          fetch('/api/pools').then((r) => r.json()),
-        ]);
-        setProfiles(profRes.profiles ?? []);
-        setPools(poolRes.pools ?? []);
-      } catch (err) {
-        setError(`Erro a carregar dados: ${(err as Error).message}`);
-      }
-    }
-    loadInitial();
+  const loadProfiles = useCallback(async () => {
+    const res = await fetch('/api/profiles');
+    const json = await res.json();
+    setProfiles(json.profiles ?? []);
   }, []);
+
+  useEffect(() => {
+    loadProfiles();
+    fetch('/api/pools')
+      .then((r) => r.json())
+      .then((j) => setPools(j.pools ?? []));
+  }, [loadProfiles]);
 
   const runScore = useCallback(async () => {
     if (!selectedProfileId || !selectedPoolId) return;
@@ -90,11 +89,7 @@ export default function ProfilesPage() {
       const res = await fetch('/api/score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pool_id: selectedPoolId,
-          profile_id: selectedProfileId,
-          limit: 100,
-        }),
+        body: JSON.stringify({ pool_id: selectedPoolId, profile_id: selectedProfileId, limit: 100 }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Erro desconhecido');
@@ -106,23 +101,114 @@ export default function ProfilesPage() {
     }
   }, [selectedProfileId, selectedPoolId]);
 
+  const handleDuplicate = useCallback(
+    async (profileId: string) => {
+      const res = await fetch('/api/profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clone_from_id: profileId }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        alert(`Erro a duplicar: ${json.error}`);
+        return;
+      }
+      await loadProfiles();
+      if (json.profile?.id) router.push(`/profiles/${json.profile.id}/edit`);
+    },
+    [loadProfiles, router]
+  );
+
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
 
   return (
     <main className="min-h-screen bg-neutral-50 py-10">
       <div className="mx-auto max-w-6xl px-6">
-        <header className="mb-8">
-          <h1 className="text-2xl font-semibold text-neutral-900">Perfis de scouting</h1>
-          <p className="mt-2 text-sm text-neutral-600">
-            Escolhe um perfil e um pool. Aplicamos o perfil aos jogadores elegíveis e mostramos
-            o ranking ordenado por score. Clica numa linha para ver o breakdown por métrica.
-          </p>
+        <header className="mb-8 flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold text-neutral-900">Perfis de scouting</h1>
+            <p className="mt-2 text-sm text-neutral-600">
+              Aplica um perfil a um pool para ver o ranking. Podes editar perfis existentes,
+              duplicar para criar variantes, ou criar um novo do zero.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => router.push('/profiles/new')}
+            className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
+          >
+            + Novo perfil
+          </button>
         </header>
 
+        {/* ── Lista de perfis com acções ──────────────────────────────── */}
+        <section className="mb-8 rounded-lg border border-neutral-200 bg-white">
+          <div className="border-b border-neutral-200 px-6 py-3 text-sm font-semibold text-neutral-900">
+            Perfis disponíveis ({profiles.length})
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
+              <tr>
+                <th className="px-4 py-2">Nome</th>
+                <th className="px-4 py-2">Posições</th>
+                <th className="px-4 py-2">Métricas</th>
+                <th className="px-4 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {profiles.map((p) => {
+                const seed = p.tags?.includes('seed');
+                const entries = p.weights?.entries ?? [];
+                return (
+                  <tr key={p.id} className="border-t border-neutral-100">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-neutral-900">{p.name}</span>
+                        {seed && (
+                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                            seed
+                          </span>
+                        )}
+                      </div>
+                      {p.description && (
+                        <div className="mt-0.5 text-xs text-neutral-500">{p.description}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-neutral-600">
+                      {p.filters?.positions?.join(', ') ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-neutral-600">{entries.length}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={() => router.push(`/profiles/${p.id}/edit`)}
+                          className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDuplicate(p.id)}
+                          className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
+                        >
+                          Duplicar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+
+        {/* ── Aplicar perfil ──────────────────────────────────────────── */}
         <section className="rounded-lg border border-neutral-200 bg-white p-6">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <h2 className="text-sm font-semibold text-neutral-900">Aplicar perfil a um pool</h2>
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-neutral-700">Perfil</label>
+              <label className="block text-xs font-medium text-neutral-700">Perfil</label>
               <select
                 value={selectedProfileId}
                 onChange={(e) => setSelectedProfileId(e.target.value)}
@@ -135,13 +221,10 @@ export default function ProfilesPage() {
                   </option>
                 ))}
               </select>
-              {selectedProfile?.description && (
-                <p className="mt-2 text-xs text-neutral-500">{selectedProfile.description}</p>
-              )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-neutral-700">Pool</label>
+              <label className="block text-xs font-medium text-neutral-700">Pool</label>
               <select
                 value={selectedPoolId}
                 onChange={(e) => setSelectedPoolId(e.target.value)}
@@ -166,10 +249,11 @@ export default function ProfilesPage() {
           </button>
         </section>
 
+        {/* Pesos do perfil seleccionado */}
         {selectedProfile && selectedProfile.weights?.entries && (
           <section className="mt-6 rounded-lg border border-neutral-200 bg-white p-6">
             <h2 className="text-sm font-semibold text-neutral-900">
-              Pesos do perfil: {selectedProfile.name}
+              Pesos: {selectedProfile.name}
             </h2>
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-3">
               {selectedProfile.weights.entries.map((w) => (
@@ -182,16 +266,6 @@ export default function ProfilesPage() {
                 </div>
               ))}
             </div>
-            {selectedProfile.filters && (
-              <div className="mt-3 text-xs text-neutral-600">
-                <strong>Filtros:</strong>{' '}
-                {selectedProfile.filters.positions?.join(', ')}
-                {selectedProfile.filters.min_minutes != null &&
-                  `, min ${selectedProfile.filters.min_minutes}min`}
-                {selectedProfile.filters.min_age != null &&
-                  `, idade ${selectedProfile.filters.min_age}-${selectedProfile.filters.max_age ?? '∞'}`}
-              </div>
-            )}
           </section>
         )}
 

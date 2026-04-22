@@ -40,7 +40,6 @@ async function main() {
   let created = 0;
   let updated = 0;
   for (const p of SEED_PROFILES) {
-    // Procurar existente por nome
     const { data: existing, error: selErr } = await supabase
       .from('scouting_profiles')
       .select('id')
@@ -56,6 +55,7 @@ async function main() {
       description: p.description ?? null,
       filters: p.filters as unknown as Json,
       weights: { entries: p.weights, peer_group_positions: p.peer_group_positions ?? [] } as unknown as Json,
+      tags: ['seed'],
     };
 
     if (existing?.id) {

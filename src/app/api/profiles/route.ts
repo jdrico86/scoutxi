@@ -32,15 +32,21 @@ const WeightsSchema = z
   })
   .strict();
 
-const CreateProfileSchema = z.object({
-  name: z.string().min(1).max(200),
-  description: z.string().max(2000).optional(),
-  filters: FiltersSchema,
-  weights: WeightsSchema,
-  tags: z.array(z.string()).max(20).optional(),
-});
+// Dois modos de criar: full payload, ou clone_from_id (cria cópia do perfil fornecido)
+const CreateProfileSchema = z.union([
+  z.object({
+    name: z.string().min(1).max(200),
+    description: z.string().max(2000).optional(),
+    filters: FiltersSchema,
+    weights: WeightsSchema,
+    tags: z.array(z.string()).max(20).optional(),
+  }),
+  z.object({
+    clone_from_id: z.string().uuid(),
+    new_name: z.string().min(1).max(200).optional(),
+  }),
+]);
 
-/** Validação extra: pesos somam ~100 (tolerância 0.5). */
 function validateWeightSum(entries: Array<{ weight: number }>): string | null {
   const sum = entries.reduce((s, e) => s + e.weight, 0);
   if (Math.abs(sum - 100) > 0.5) {
@@ -53,9 +59,7 @@ function validateWeightSum(entries: Array<{ weight: number }>): string | null {
 export async function GET() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
-  }
+  if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
   const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
 
   const { data, error } = await supabase
@@ -63,7 +67,6 @@ export async function GET() {
     .select('id, name, description, tags, created_at, updated_at, filters, weights')
     .order('name');
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
   return NextResponse.json({ profiles: data ?? [] });
 }
 
@@ -71,9 +74,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
-  }
+  if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
 
   let body: z.infer<typeof CreateProfileSchema>;
   try {
@@ -82,10 +83,39 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Input inválido: ${(err as Error).message}` }, { status: 400 });
   }
 
+  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
+
+  // Modo clone
+  if ('clone_from_id' in body) {
+    const { data: source, error: srcErr } = await supabase
+      .from('scouting_profiles')
+      .select('*')
+      .eq('id', body.clone_from_id)
+      .maybeSingle();
+    if (srcErr) return NextResponse.json({ error: srcErr.message }, { status: 500 });
+    if (!source) return NextResponse.json({ error: 'Perfil origem não encontrado.' }, { status: 404 });
+
+    const newName = body.new_name ?? `${source.name} (cópia)`;
+    const cloneTags = (source.tags ?? []).filter((t) => t !== 'seed');
+
+    const { data: created, error: insErr } = await supabase
+      .from('scouting_profiles')
+      .insert({
+        name: newName,
+        description: source.description,
+        filters: source.filters,
+        weights: source.weights,
+        tags: cloneTags.length > 0 ? cloneTags : null,
+      })
+      .select('id, name')
+      .single();
+    if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
+    return NextResponse.json({ ok: true, profile: created, cloned_from: body.clone_from_id }, { status: 201 });
+  }
+
+  // Modo full payload
   const sumError = validateWeightSum(body.weights.entries);
   if (sumError) return NextResponse.json({ error: sumError }, { status: 400 });
-
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
 
   const { data, error } = await supabase
     .from('scouting_profiles')
@@ -98,8 +128,6 @@ export async function POST(req: NextRequest) {
     })
     .select('id, name')
     .single();
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, profile: data }, { status: 201 });
 }

@@ -110,19 +110,19 @@ export async function POST(req: NextRequest) {
   // 2) Jogadores existentes desta pool, para decidir insert vs update
   const { data: existing, error: existingErr } = await supabase
     .from('players')
-    .select('id, name, current_team')
+    .select('id, name, current_team, age')
     .eq('pool_id', poolId);
   if (existingErr) {
     return NextResponse.json({ error: `Erro a ler jogadores existentes: ${existingErr.message}` }, { status: 500 });
   }
 
   // Chave composta: name|team (lowercase). Mais robusto que só nome — homónimos.
-  const keyOf = (name: string, team: string | null | undefined) =>
-    `${name.toLowerCase()}::${(team ?? '').toLowerCase()}`;
+  const keyOf = (name: string, team: string | null | undefined, age: number | null | undefined) =>
+    `${name.toLowerCase()}::${(team ?? '').toLowerCase()}::${age ?? ''}`;
 
   const existingByKey = new Map<string, string>(); // key -> player_id
   for (const p of existing ?? []) {
-    existingByKey.set(keyOf(p.name, p.current_team), p.id);
+    existingByKey.set(keyOf(p.name, p.current_team, p.age), p.id);
   }
 
   // Separar em novos vs a actualizar
@@ -134,7 +134,8 @@ export async function POST(req: NextRequest) {
   for (const p of parsed.players) {
     const name = String(p.data.name);
     const team = (p.data.current_team as string | null | undefined) ?? null;
-    const key = keyOf(name, team);
+    const age = (p.data.age as number | null | undefined) ?? null;
+    const key = keyOf(name, team, age);
     const existingId = existingByKey.get(key);
 
     if (existingId) {
@@ -149,12 +150,12 @@ export async function POST(req: NextRequest) {
   let insertedCount = 0;
   for (let i = 0; i < toInsert.length; i += BATCH_PLAYERS) {
     const batch = toInsert.slice(i, i + BATCH_PLAYERS);
-    const { data, error } = await supabase.from('players').insert(batch).select('id, name, current_team');
+    const { data, error } = await supabase.from('players').insert(batch).select('id, name, current_team, age');
     if (error) {
       return NextResponse.json({ error: `Erro a inserir jogadores: ${error.message}` }, { status: 500 });
     }
     for (const p of data ?? []) {
-      existingByKey.set(keyOf(p.name, p.current_team), p.id);
+      existingByKey.set(keyOf(p.name, p.current_team, p.age), p.id);
     }
     insertedCount += data?.length ?? 0;
   }
@@ -162,7 +163,7 @@ export async function POST(req: NextRequest) {
   // Agora que todos os IDs existem, preenchemos rowToPlayerId também para os novos
   for (const p of parsed.players) {
     if (rowToPlayerId.has(p.rowIndex)) continue;
-    const id = existingByKey.get(keyOf(String(p.data.name), (p.data.current_team as string | null) ?? null));
+    const id = existingByKey.get(keyOf(String(p.data.name), (p.data.current_team as string | null) ?? null, (p.data.age as number | null) ?? null));
     if (id) rowToPlayerId.set(p.rowIndex, id);
   }
 

@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Plus, Search } from 'lucide-react';
+import { X, Plus, Search, FileText } from 'lucide-react';
 
 type Player = {
   id: string;
@@ -277,14 +277,30 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                   </span>
                 )}
                 {!compareData && (
-                  <button
-                    type="button"
-                    onClick={() => setCompareOpen((v) => !v)}
-                    className="flex items-center gap-1.5 rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
-                  >
-                    <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-                    Comparar com outro
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const profileId = selectedProfileId;
+                        const url = profileId
+                          ? `/players/${id}/report?profile=${profileId}`
+                          : `/players/${id}/report`;
+                        router.push(url);
+                      }}
+                      className="flex items-center gap-1.5 rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                    >
+                      <FileText className="h-3.5 w-3.5" strokeWidth={2} />
+                      Report Card
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCompareOpen((v) => !v)}
+                      className="flex items-center gap-1.5 rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+                      Comparar com outro
+                    </button>
+                  </>
                 )}
                 {compareData && (
                   <button

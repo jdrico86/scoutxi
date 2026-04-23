@@ -205,7 +205,15 @@ export default function ShortlistDetailPage({ params }: { params: Promise<{ id: 
                       <td className="px-3 py-3 font-semibold">
                         {item.snapshot_score?.toFixed(1) ?? '—'}
                       </td>
-                      <td className="px-3 py-3 font-medium text-neutral-900">{p.name}</td>
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => router.push(`/players/${p.id}`)}
+                          className="font-medium text-neutral-900 hover:text-emerald-700 hover:underline"
+                        >
+                          {p.name}
+                        </button>
+                      </td>
                       <td className="px-3 py-3 text-neutral-700">{p.current_team ?? '—'}</td>
                       <td className="px-3 py-3 text-neutral-600">{p.position_primary ?? '—'}</td>
                       <td className="px-3 py-3 text-neutral-600">{p.age ?? '—'}</td>

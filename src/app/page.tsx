@@ -1,93 +1,83 @@
-import { supabase } from '@/lib/supabase/client'
+import { supabase } from '@/lib/supabase/client';
+import HomeShortcuts from './HomeShortcuts';
 
 export default async function HomePage() {
-  // Queries paralelas para poupar tempo (em vez de uma a uma)
-  const [poolsResult, playersResult, metricsResult] = await Promise.all([
+  // Queries paralelas (server-side, como estava antes)
+  const [poolsResult, playersResult, profilesResult, shortlistsResult] = await Promise.all([
     supabase.from('pools').select('*', { count: 'exact', head: true }),
     supabase.from('players').select('*', { count: 'exact', head: true }),
-    supabase.from('metrics').select('*', { count: 'exact', head: true }),
-  ])
+    supabase.from('scouting_profiles').select('*', { count: 'exact', head: true }),
+    supabase.from('shortlists').select('*', { count: 'exact', head: true }),
+  ]);
 
-  const poolsCount = poolsResult.count ?? 0
-  const playersCount = playersResult.count ?? 0
-  const metricsCount = metricsResult.count ?? 0
+  const poolsCount = poolsResult.count ?? 0;
+  const playersCount = playersResult.count ?? 0;
+  const profilesCount = profilesResult.count ?? 0;
+  const shortlistsCount = shortlistsResult.count ?? 0;
 
-  const hasError = poolsResult.error || playersResult.error || metricsResult.error
+  const hasError =
+    poolsResult.error || playersResult.error || profilesResult.error || shortlistsResult.error;
 
   if (hasError) {
     return (
-      <main style={{ padding: 40, fontFamily: 'monospace' }}>
-        <h1>Erro ao ler do Supabase</h1>
-        <pre>{JSON.stringify({ 
-          pools: poolsResult.error, 
-          players: playersResult.error, 
-          metrics: metricsResult.error 
-        }, null, 2)}</pre>
+      <main className="p-10">
+        <div className="mx-auto max-w-4xl rounded-lg border border-red-200 bg-red-50 p-6">
+          <h1 className="text-lg font-semibold text-red-900">Erro ao ler do Supabase</h1>
+          <pre className="mt-3 overflow-x-auto text-xs text-red-800">
+            {JSON.stringify(
+              {
+                pools: poolsResult.error,
+                players: playersResult.error,
+                profiles: profilesResult.error,
+                shortlists: shortlistsResult.error,
+              },
+              null,
+              2
+            )}
+          </pre>
+        </div>
       </main>
-    )
+    );
   }
 
   return (
-    <main style={{ 
-      padding: '60px 40px', 
-      fontFamily: 'system-ui, -apple-system, sans-serif',
-      maxWidth: 800,
-      margin: '0 auto'
-    }}>
-      <div style={{ marginBottom: 8, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: '#888' }}>
-        v0.1 · desenvolvimento
-      </div>
-      <h1 style={{ fontSize: 42, margin: 0, letterSpacing: '-0.02em' }}>Scout XI</h1>
-      <p style={{ color: '#666', fontSize: 16, marginTop: 8 }}>
-        Plataforma de scouting de futebol — em construção
-      </p>
+    <main className="py-10">
+      <div className="mx-auto max-w-5xl px-6">
+        <header className="mb-10">
+          <h1 className="text-3xl font-semibold tracking-tight text-neutral-900">
+            Scout XI
+          </h1>
+          <p className="mt-2 text-sm text-neutral-600">
+            Plataforma de scouting para o futebol português. Importa dados Wyscout,
+            aplica perfis editáveis, guarda listas de prospects.
+          </p>
+        </header>
 
-      <div style={{ 
-        marginTop: 48, 
-        display: 'grid', 
-        gridTemplateColumns: 'repeat(3, 1fr)', 
-        gap: 24 
-      }}>
-        <Card label="Pools" value={poolsCount} hint="importações de dados" />
-        <Card label="Jogadores" value={playersCount} hint="no universo total" />
-        <Card label="Métricas" value={metricsCount} hint="no schema canónico" />
-      </div>
+        {/* Stats */}
+        <section className="mb-10 grid grid-cols-2 gap-4 md:grid-cols-4">
+          <StatCard label="Pools" value={poolsCount} hint="importações de dados" />
+          <StatCard label="Jogadores" value={playersCount} hint="no universo total" />
+          <StatCard label="Perfis" value={profilesCount} hint="seed + criados" />
+          <StatCard label="Shortlists" value={shortlistsCount} hint="listas activas" />
+        </section>
 
-      <div style={{ marginTop: 48, padding: 20, background: '#f7f7f5', borderRadius: 8 }}>
-        <div style={{ fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase', color: '#888', marginBottom: 8 }}>
-          Próximo passo
-        </div>
-        <div style={{ fontSize: 15 }}>
-          Construir o parser Wyscout XLSX para importar o primeiro pool de dados.
-        </div>
+        {/* Atalhos */}
+        <HomeShortcuts />
       </div>
     </main>
-  )
+  );
 }
 
-function Card({ label, value, hint }: { label: string; value: number; hint: string }) {
+function StatCard({ label, value, hint }: { label: string; value: number; hint: string }) {
   return (
-    <div style={{ 
-      padding: 24, 
-      background: '#fff', 
-      border: '1px solid #eee', 
-      borderRadius: 8 
-    }}>
-      <div style={{ 
-        fontSize: 11, 
-        letterSpacing: 1.5, 
-        textTransform: 'uppercase', 
-        color: '#888', 
-        marginBottom: 8 
-      }}>
+    <div className="rounded-lg border border-neutral-200 bg-white p-5">
+      <div className="text-xs font-medium uppercase tracking-wider text-neutral-500">
         {label}
       </div>
-      <div style={{ fontSize: 36, fontWeight: 600, letterSpacing: '-0.02em' }}>
-        {value}
+      <div className="mt-1 text-3xl font-semibold tracking-tight text-neutral-900">
+        {value.toLocaleString('pt-PT')}
       </div>
-      <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
-        {hint}
-      </div>
+      <div className="mt-1 text-xs text-neutral-400">{hint}</div>
     </div>
-  )
+  );
 }

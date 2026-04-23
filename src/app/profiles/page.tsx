@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 type ProfileListItem = {
   id: string;
@@ -57,14 +57,30 @@ type ScoreResponse = {
 
 export default function ProfilesPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialProfileId = searchParams.get('profile') ?? '';
+  const initialPoolId = searchParams.get('pool') ?? '';
+
   const [profiles, setProfiles] = useState<ProfileListItem[]>([]);
   const [pools, setPools] = useState<Pool[]>([]);
-  const [selectedProfileId, setSelectedProfileId] = useState<string>('');
-  const [selectedPoolId, setSelectedPoolId] = useState<string>('');
+  const [selectedProfileId, setSelectedProfileId] = useState<string>(initialProfileId);
+  const [selectedPoolId, setSelectedPoolId] = useState<string>(initialPoolId);
   const [result, setResult] = useState<ScoreResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+
+  // Sincronizar URL sempre que mudam as selecções
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (selectedProfileId) params.set('profile', selectedProfileId);
+    if (selectedPoolId) params.set('pool', selectedPoolId);
+    const next = params.toString();
+    const current = searchParams.toString();
+    if (next !== current) {
+      router.replace(next ? `/profiles?${next}` : '/profiles', { scroll: false });
+    }
+  }, [selectedProfileId, selectedPoolId, router, searchParams]);
 
   const loadProfiles = useCallback(async () => {
     const res = await fetch('/api/profiles');
@@ -78,6 +94,8 @@ export default function ProfilesPage() {
       .then((r) => r.json())
       .then((j) => setPools(j.pools ?? []));
   }, [loadProfiles]);
+  // Auto-apply quando chegamos com params + listas já carregadas
+  const [autoAppliedOnce, setAutoAppliedOnce] = useState(false);
 
   const runScore = useCallback(async () => {
     if (!selectedProfileId || !selectedPoolId) return;
@@ -100,6 +118,15 @@ export default function ProfilesPage() {
       setLoading(false);
     }
   }, [selectedProfileId, selectedPoolId]);
+
+  // Se chegamos à página com params + listas já carregadas, corre score automaticamente
+  useEffect(() => {
+    if (autoAppliedOnce) return;
+    if (!selectedProfileId || !selectedPoolId) return;
+    if (profiles.length === 0 || pools.length === 0) return;
+    setAutoAppliedOnce(true);
+    runScore();
+  }, [autoAppliedOnce, selectedProfileId, selectedPoolId, profiles.length, pools.length, runScore]);
 
   const handleDuplicate = useCallback(
     async (profileId: string) => {
@@ -362,7 +389,18 @@ export default function ProfilesPage() {
                       >
                         <td className="px-4 py-3 text-neutral-500">{i + 1}</td>
                         <td className="px-4 py-3 font-semibold">{p.score.toFixed(1)}</td>
-                        <td className="px-4 py-3 font-medium text-neutral-900">{p.name}</td>
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              router.push(`/players/${p.player_id}`);
+                            }}
+                            className="font-medium text-neutral-900 hover:text-emerald-700 hover:underline"
+                          >
+                            {p.name}
+                          </button>
+                        </td>
                         <td className="px-4 py-3 text-neutral-700">{p.current_team ?? '—'}</td>
                         <td className="px-4 py-3 text-neutral-600">{p.position_primary ?? '—'}</td>
                         <td className="px-4 py-3 text-neutral-600">{p.age ?? '—'}</td>

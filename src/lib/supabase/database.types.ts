@@ -279,6 +279,48 @@ export type Database = {
         }
         Relationships: []
       }
+      shortlist_players: {
+        Row: {
+          shortlist_id: string
+          player_id: string
+          added_at: string | null
+          snapshot_score: number | null
+          snapshot_rank: number | null
+          shortlist_note: string | null
+        }
+        Insert: {
+          shortlist_id: string
+          player_id: string
+          added_at?: string | null
+          snapshot_score?: number | null
+          snapshot_rank?: number | null
+          shortlist_note?: string | null
+        }
+        Update: {
+          shortlist_id?: string
+          player_id?: string
+          added_at?: string | null
+          snapshot_score?: number | null
+          snapshot_rank?: number | null
+          shortlist_note?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shortlist_players_shortlist_id_fkey"
+            columns: ["shortlist_id"]
+            isOneToOne: false
+            referencedRelation: "shortlists"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shortlist_players_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shortlists: {
         Row: {
           created_at: string | null

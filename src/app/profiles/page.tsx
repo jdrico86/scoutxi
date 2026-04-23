@@ -119,6 +119,31 @@ export default function ProfilesPage() {
     [loadProfiles, router]
   );
 
+  const handleSaveShortlist = useCallback(async () => {
+    if (!result) return;
+    const defaultName = `${result.profile.name} · ${result.pool.name}`;
+    const name = prompt('Nome da shortlist:', defaultName);
+    if (!name) return;
+    const res = await fetch('/api/shortlists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        pool_id: selectedPoolId,
+        profile_id: selectedProfileId,
+        limit: result.ranked.length,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      alert(`Erro: ${json.error}`);
+      return;
+    }
+    if (confirm(`Shortlist "${name}" criada com ${json.shortlist.player_count} jogadores. Abrir agora?`)) {
+      router.push(`/shortlists/${json.shortlist.id}`);
+    }
+  }, [result, selectedPoolId, selectedProfileId, router]);
+
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
 
   return (
@@ -277,21 +302,32 @@ export default function ProfilesPage() {
 
         {result && (
           <section className="mt-6 overflow-hidden rounded-lg border border-neutral-200 bg-white">
-            <div className="border-b border-neutral-200 bg-neutral-50 px-6 py-3 text-sm">
-              <span className="font-medium text-neutral-900">{result.profile.name}</span>
-              <span className="text-neutral-400"> / </span>
-              <span className="text-neutral-700">{result.pool.name}</span>
-              <span className="ml-4 text-xs text-neutral-500">
-                {result.eligible_count} elegíveis · peer group {result.peer_group_size} · pool{' '}
-                {result.total_players_in_pool}
-              </span>
-              {result.warnings.length > 0 && (
-                <ul className="mt-2 space-y-1 text-xs text-amber-700">
-                  {result.warnings.map((w, i) => (
-                    <li key={i}>⚠ {w}</li>
-                  ))}
-                </ul>
-              )}
+            <div className="flex items-start justify-between gap-4 border-b border-neutral-200 bg-neutral-50 px-6 py-3 text-sm">
+              <div className="min-w-0">
+                <div>
+                  <span className="font-medium text-neutral-900">{result.profile.name}</span>
+                  <span className="text-neutral-400"> / </span>
+                  <span className="text-neutral-700">{result.pool.name}</span>
+                </div>
+                <div className="mt-1 text-xs text-neutral-500">
+                  {result.eligible_count} elegíveis · peer group {result.peer_group_size} · pool{' '}
+                  {result.total_players_in_pool}
+                </div>
+                {result.warnings.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-xs text-amber-700">
+                    {result.warnings.map((w, i) => (
+                      <li key={i}>⚠ {w}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveShortlist}
+                className="shrink-0 rounded-md border border-neutral-300 bg-white px-3 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+              >
+                + Guardar como shortlist
+              </button>
             </div>
 
             {result.ranked.length === 0 ? (

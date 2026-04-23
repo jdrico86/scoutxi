@@ -307,10 +307,6 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
               <Detail label="Naturalidade" value={player.naturality} />
               <Detail label="Minutos" value={player.minutes_played?.toLocaleString() ?? null} />
               <Detail label="Jogos" value={player.games_played?.toString() ?? null} />
-              <Detail
-                label="Emprestado"
-                value={player.on_loan === true ? 'Sim (Wyscout)' : player.on_loan === false ? 'Não' : null}
-              />
               <Detail label="Contrato até" value={player.contract_until} />
               <Detail
                 label="Valor de mercado"

@@ -31,7 +31,6 @@ export type PlayerFieldKey =
   | 'weight_kg'
   | 'nationality'
   | 'naturality'
-  | 'on_loan';
 
 /**
  * Transformações por coluna. Devolvem undefined quando o valor Wyscout deve ser ignorado
@@ -72,16 +71,6 @@ export const PLAYER_FIELD_MAP: Record<
   'Pé': { field: 'foot', transform: toStringOrNull },
   'Altura': { field: 'height_cm', transform: toIntOrNull },
   'Peso': { field: 'weight_kg', transform: toIntOrNull },
-  'Emprestado': {
-    field: 'on_loan',
-    transform: (v) => {
-      const s = toStringOrNull(v)?.toLowerCase();
-      if (!s) return null;
-      if (s === 'sim' || s === 'yes' || s === 'true') return true;
-      if (s === 'não' || s === 'nao' || s === 'no' || s === 'false') return false;
-      return null;
-    },
-  },
 };
 
 /**

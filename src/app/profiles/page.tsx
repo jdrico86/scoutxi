@@ -69,6 +69,7 @@ function ProfilesContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [profilesListOpen, setProfilesListOpen] = useState(false);
 
   // Sincronizar URL sempre que mudam as selecções
   useEffect(() => {
@@ -195,9 +196,17 @@ function ProfilesContent() {
 
         {/* ── Lista de perfis com acções ──────────────────────────────── */}
         <section className="mb-8 rounded-lg border border-neutral-200 bg-white">
-          <div className="border-b border-neutral-200 px-6 py-3 text-sm font-semibold text-neutral-900">
-            Perfis disponíveis ({profiles.length})
-          </div>
+          <button
+            type="button"
+            onClick={() => setProfilesListOpen((v) => !v)}
+            className={`flex w-full items-center justify-between px-6 py-3 text-sm font-semibold text-neutral-900 hover:bg-neutral-50 ${
+              profilesListOpen ? 'border-b border-neutral-200' : ''
+            }`}
+          >
+            <span>Perfis disponíveis ({profiles.length})</span>
+            <span className="text-neutral-400">{profilesListOpen ? '▾' : '▸'}</span>
+          </button>
+          {profilesListOpen && (
           <table className="w-full text-sm">
             <thead className="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
               <tr>
@@ -253,6 +262,7 @@ function ProfilesContent() {
               })}
             </tbody>
           </table>
+          )}
         </section>
 
         {/* ── Aplicar perfil ──────────────────────────────────────────── */}

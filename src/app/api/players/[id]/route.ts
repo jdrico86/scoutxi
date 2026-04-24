@@ -4,6 +4,34 @@ import type { Database } from '@/lib/supabase/database.types';
 import { loadPoolData, profileRowToProfile } from '@/lib/scouting/db-helpers';
 import { scoreProfile } from '@/lib/scouting/scorer';
 
+type ProfileFilters = {
+  positions?: string[];
+  min_minutes?: number;
+  min_age?: number;
+  max_age?: number;
+};
+
+function getEligibilityReason(
+  player: { age: number | null; minutes_played: number | null; position_primary: string | null },
+  filters: ProfileFilters | null
+): string | null {
+  if (!filters) return null;
+  const { min_age, max_age, min_minutes, positions } = filters;
+  if (positions && positions.length > 0 && player.position_primary && !positions.includes(player.position_primary)) {
+    return `posição ${player.position_primary} fora das aceites (${positions.join(', ')})`;
+  }
+  if (max_age != null && player.age != null && player.age > max_age) {
+    return `idade acima do limite (${player.age} vs ${max_age})`;
+  }
+  if (min_age != null && player.age != null && player.age < min_age) {
+    return `idade abaixo do limite (${player.age} vs ${min_age})`;
+  }
+  if (min_minutes != null && player.minutes_played != null && player.minutes_played < min_minutes) {
+    return `minutos abaixo do mínimo (${player.minutes_played} vs ${min_minutes})`;
+  }
+  return null;
+}
+
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
@@ -98,6 +126,7 @@ export async function GET(_: NextRequest, { params }: Params) {
     score: number | null;
     rank: number | null;
     eligible: boolean;
+    eligibility_reason: string | null;
     total_eligible: number;
   }> = [];
 
@@ -128,9 +157,11 @@ export async function GET(_: NextRequest, { params }: Params) {
           score: found.score,
           rank,
           eligible: true,
+          eligibility_reason: null,
           total_eligible: result.ranked.length,
         });
       } else {
+        const reason = getEligibilityReason(player, profileRow.filters as ProfileFilters | null);
         poolScores.push({
           profile_id: profileRow.id,
           profile_name: profileRow.name,
@@ -139,6 +170,7 @@ export async function GET(_: NextRequest, { params }: Params) {
           score: null,
           rank: null,
           eligible: false,
+          eligibility_reason: reason,
           total_eligible: result.ranked.length,
         });
       }
@@ -155,28 +187,28 @@ export async function GET(_: NextRequest, { params }: Params) {
   }
 
   return NextResponse.json({
-    player: {
-      id: player.id,
-      name: player.name,
-      current_team: player.current_team,
-      position_primary: player.position_primary,
-      positions_secondary: player.positions_secondary,
-      age: player.age,
-      height_cm: player.height_cm,
-      weight_kg: player.weight_kg,
-      foot: player.foot,
-      nationality: player.nationality,
-      naturality: player.naturality,
-      on_loan: player.on_loan,
-      contract_until: player.contract_until,
-      market_value_eur: player.market_value_eur,
-      minutes_played: player.minutes_played,
-      games_played: player.games_played,
-    },
-    pool,
-    stats: stats ?? [],
-    note: noteData ?? null,
-    shortlists,
-    applicable_profiles: poolScores,
-  });
-}
+      player: {
+        id: player.id,
+        name: player.name,
+        current_team: player.current_team,
+        position_primary: player.position_primary,
+        positions_secondary: player.positions_secondary,
+        age: player.age,
+        height_cm: player.height_cm,
+        weight_kg: player.weight_kg,
+        foot: player.foot,
+        nationality: player.nationality,
+        naturality: player.naturality,
+        on_loan: player.on_loan,
+        contract_until: player.contract_until,
+        market_value_eur: player.market_value_eur,
+        minutes_played: player.minutes_played,
+        games_played: player.games_played,
+      },
+      pool,
+      stats: stats ?? [],
+      note: noteData ?? null,
+      shortlists,
+      applicable_profiles: poolScores,
+    });
+  }

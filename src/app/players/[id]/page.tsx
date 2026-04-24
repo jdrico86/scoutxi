@@ -33,6 +33,7 @@ type ApplicableProfile = {
   score: number | null;
   rank: number | null;
   eligible: boolean;
+  eligibility_reason: string | null;
   total_eligible: number;
 };
 
@@ -382,9 +383,8 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                           type="button"
                           onClick={() => p.eligible && setSelectedProfileId(p.profile_id)}
                           disabled={!p.eligible}
-                          className={`block w-full px-4 py-3 text-left transition-colors ${
-                            active ? 'bg-neutral-50' : 'hover:bg-neutral-50'
-                          } ${!p.eligible ? 'cursor-not-allowed opacity-60' : ''}`}
+                          className={`block w-full px-4 py-3 text-left transition-colors ${active ? 'bg-neutral-50' : 'hover:bg-neutral-50'
+                            } ${!p.eligible ? 'cursor-not-allowed opacity-60' : ''}`}
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0 flex-1">
@@ -403,7 +403,9 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                                   #{p.rank} de {p.total_eligible} elegíveis
                                 </div>
                               ) : (
-                                <div className="mt-0.5 text-xs text-neutral-400">Não elegível</div>
+                                <div className="mt-0.5 text-xs text-neutral-400">
+                                  Não elegível{p.eligibility_reason ? ` · ${p.eligibility_reason}` : ''}
+                                </div>
                               )}
                             </div>
                             <div className="shrink-0 text-right">

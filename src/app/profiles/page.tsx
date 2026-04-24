@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 type ProfileListItem = {
@@ -55,7 +55,7 @@ type ScoreResponse = {
   ranked: RankedPlayer[];
 };
 
-export default function ProfilesPage() {
+function ProfilesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialProfileId = searchParams.get('profile') ?? '';
@@ -480,5 +480,19 @@ export default function ProfilesPage() {
         )}
       </div>
     </main>
+  );
+export default function ProfilesPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-neutral-50 py-10">
+          <div className="mx-auto max-w-6xl px-6 text-sm text-neutral-500">
+            A carregar…
+          </div>
+        </main>
+      }
+    >
+      <ProfilesContent />
+    </Suspense>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, use, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Download, ArrowLeft } from 'lucide-react';
 import { toPng } from 'html-to-image';
@@ -59,7 +59,7 @@ type ProfileBreakdown = {
   missing_metrics: string[];
 };
 
-export default function ReportCardPage({ params }: { params: Promise<{ id: string }> }) {
+function ReportCardContent({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -484,5 +484,13 @@ function ReportRadar({ contributions }: { contributions: Contribution[] }) {
         );
       })}
     </svg>
+  );
+export default function ReportCardPage({ params }: { params: Promise<{ id: string }> }) {
+  return (
+    <Suspense
+      fallback={<div className="p-10 text-sm text-neutral-500">A carregar…</div>}
+    >
+      <ReportCardContent params={params} />
+    </Suspense>
   );
 }

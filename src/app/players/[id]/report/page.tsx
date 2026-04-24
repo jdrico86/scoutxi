@@ -485,6 +485,7 @@ function ReportRadar({ contributions }: { contributions: Contribution[] }) {
       })}
     </svg>
   );
+}
 export default function ReportCardPage({ params }: { params: Promise<{ id: string }> }) {
   return (
     <Suspense

@@ -481,6 +481,7 @@ function ProfilesContent() {
       </div>
     </main>
   );
+}
 export default function ProfilesPage() {
   return (
     <Suspense

@@ -9,6 +9,7 @@ import {
   Trophy,
   Search,
   UserCircle2,
+  Users,
 } from 'lucide-react';
 
 type NavItem = {
@@ -19,6 +20,7 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { label: 'Perfis', href: '/profiles', icon: Target },
+  { label: 'Equipas', href: '/teams', icon: Users },
   { label: 'Melhor 11', href: '/best-eleven', icon: Trophy },
   { label: 'Shortlists', href: '/shortlists', icon: ClipboardList },
   { label: 'Importar', href: '/import', icon: Upload },

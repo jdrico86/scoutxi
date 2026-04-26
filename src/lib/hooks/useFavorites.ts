@@ -37,7 +37,7 @@ export function useFavorites() {
   const toggle = useCallback(async (playerId: string) => {
     const isCurrentlyFav = (cachedFavorites ?? new Set()).has(playerId);
     // Otimista: atualizar UI imediatamente
-    const next = new Set(cachedFavorites ?? new Set());
+    const next = new Set<string>(cachedFavorites ?? []);
     if (isCurrentlyFav) next.delete(playerId);
     else next.add(playerId);
     notify(next);
@@ -54,7 +54,7 @@ export function useFavorites() {
       }
     } catch (e) {
       // Reverter em caso de erro
-      const reverted = new Set(cachedFavorites ?? new Set());
+      const reverted = new Set<string>(cachedFavorites ?? []);
       if (isCurrentlyFav) reverted.add(playerId);
       else reverted.delete(playerId);
       notify(reverted);

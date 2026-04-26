@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { FavoriteStar } from '@/components/FavoriteStar';
 
 type Pool = { id: string; name: string; season: string; competition: string | null };
 
@@ -283,22 +284,20 @@ function TeamsContent() {
               <button
                 type="button"
                 onClick={() => setSortMode('position')}
-                className={`rounded-md px-3 py-1 ${
-                  sortMode === 'position'
+                className={`rounded-md px-3 py-1 ${sortMode === 'position'
                     ? 'bg-neutral-900 text-white'
                     : 'border border-neutral-300 text-neutral-700 hover:bg-neutral-50'
-                }`}
+                  }`}
               >
                 Posição
               </button>
               <button
                 type="button"
                 onClick={() => setSortMode('minutes')}
-                className={`rounded-md px-3 py-1 ${
-                  sortMode === 'minutes'
+                className={`rounded-md px-3 py-1 ${sortMode === 'minutes'
                     ? 'bg-neutral-900 text-white'
                     : 'border border-neutral-300 text-neutral-700 hover:bg-neutral-50'
-                }`}
+                  }`}
               >
                 Minutos
               </button>
@@ -370,7 +369,10 @@ function PlayerCard({ player, onClick }: { player: TeamPlayer; onClick: () => vo
       className="block w-full rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-400"
     >
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="truncate font-medium text-neutral-900">{player.name}</h3>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <FavoriteStar playerId={player.id} />
+          <h3 className="truncate font-medium text-neutral-900">{player.name}</h3>
+        </div>
         <span className="shrink-0 text-xs text-neutral-500">
           {player.position_primary ?? '—'}
         </span>

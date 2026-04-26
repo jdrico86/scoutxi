@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { FavoriteStar } from '@/components/FavoriteStar';
 
 type Player = {
   id: string;
@@ -221,13 +222,16 @@ export default function ShortlistDetailPage({ params }: { params: Promise<{ id: 
                         {p.minutes_played?.toLocaleString() ?? '—'}
                       </td>
                       <td className="px-3 py-3">
-                        <button
-                          type="button"
-                          onClick={() => startEditingNote(item)}
-                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${sLabel.color} hover:opacity-80`}
-                        >
-                          {sLabel.label}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <FavoriteStar playerId={p.id} />
+                          <button
+                            type="button"
+                            onClick={() => router.push(`/players/${p.id}`)}
+                            className="font-medium text-neutral-900 hover:text-emerald-700 hover:underline"
+                          >
+                            {p.name}
+                          </button>
+                        </div>
                       </td>
                       <td className="px-3 py-3 text-right">
                         <button

@@ -10,7 +10,9 @@ import {
   Search,
   UserCircle2,
   Users,
+  Shield,
 } from 'lucide-react';
+import { FavoriteStar } from '@/components/FavoriteStar';
 
 type NavItem = {
   label: string;
@@ -35,13 +37,21 @@ type PlayerHit = {
   pool_name: string | null;
 };
 
+type TeamHit = {
+  name: string;
+  pool_id: string;
+  pool_name: string | null;
+};
+
 export function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<PlayerHit[]>([]);
+  const [playerResults, setPlayerResults] = useState<PlayerHit[]>([]);
+  const [teamResults, setTeamResults] = useState<TeamHit[]>([]);
   const [showResults, setShowResults] = useState(false);
   const [loading, setLoading] = useState(false);
+
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -60,15 +70,18 @@ export function Sidebar() {
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
     if (query.trim().length < 2) {
-      setResults([]);
+      setPlayerResults([]);
+      setTeamResults([]);
       return;
     }
+
     timer.current = setTimeout(async () => {
       setLoading(true);
       try {
         const res = await fetch(`/api/players/search?q=${encodeURIComponent(query.trim())}`);
         const json = await res.json();
-        setResults(json.players ?? []);
+        setPlayerResults(json.players ?? []);
+        setTeamResults(json.teams ?? []);
         setShowResults(true);
       } finally {
         setLoading(false);
@@ -83,10 +96,22 @@ export function Sidebar() {
 
   const goToPlayer = (id: string) => {
     setQuery('');
-    setResults([]);
+    setPlayerResults([]);
+    setTeamResults([]);
     setShowResults(false);
     router.push(`/players/${id}`);
   };
+
+  const goToTeam = (poolId: string, teamName: string) => {
+    setQuery('');
+    setPlayerResults([]);
+    setTeamResults([]);
+    setShowResults(false);
+    const params = new URLSearchParams({ pool: poolId, team: teamName });
+    router.push(`/teams?${params}`);
+  };
+
+  const hasResults = playerResults.length > 0 || teamResults.length > 0;
 
   return (
     <aside className="fixed left-0 top-0 bottom-0 z-20 flex w-60 flex-col border-r border-neutral-200 bg-white">
@@ -127,7 +152,7 @@ export function Sidebar() {
           })}
         </ul>
 
-        {/* Pesquisar jogador */}
+        {/* Pesquisar jogador ou equipa */}
         <div className="mt-6" ref={containerRef}>
           <div className="px-3 pb-2 text-xs font-medium uppercase tracking-wider text-neutral-400">
             Pesquisar
@@ -140,7 +165,7 @@ export function Sidebar() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onFocus={() => query.length >= 2 && setShowResults(true)}
-                placeholder="Nome do jogador…"
+                placeholder="Jogador ou equipa…"
                 className="w-full rounded-md border border-neutral-200 bg-neutral-50 py-1.5 pl-9 pr-3 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:bg-white focus:outline-none"
               />
             </div>
@@ -149,29 +174,70 @@ export function Sidebar() {
               <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-96 overflow-y-auto rounded-md border border-neutral-200 bg-white shadow-lg">
                 {loading ? (
                   <div className="px-3 py-2 text-xs text-neutral-500">A procurar…</div>
-                ) : results.length === 0 ? (
-                  <div className="px-3 py-2 text-xs text-neutral-500">Nenhum jogador encontrado.</div>
+                ) : !hasResults ? (
+                  <div className="px-3 py-2 text-xs text-neutral-500">Sem resultados.</div>
                 ) : (
-                  <ul>
-                    {results.map((p) => (
-                      <li key={p.id}>
-                        <button
-                          type="button"
-                          onClick={() => goToPlayer(p.id)}
-                          className="block w-full px-3 py-2 text-left hover:bg-neutral-50"
-                        >
-                          <div className="flex items-center gap-2">
-                            <UserCircle2 className="h-4 w-4 shrink-0 text-neutral-400" strokeWidth={1.6} />
-                            <span className="truncate text-sm font-medium text-neutral-900">{p.name}</span>
-                          </div>
-                          <div className="ml-6 mt-0.5 truncate text-xs text-neutral-500">
-                            {[p.current_team, p.position_primary, p.age].filter(Boolean).join(' · ')}
-                            {p.pool_name && <span className="text-neutral-400"> · {p.pool_name}</span>}
-                          </div>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
+                  <>
+                    {teamResults.length > 0 && (
+                      <div>
+                        <div className="border-b border-neutral-100 bg-neutral-50 px-3 py-1 text-xs font-medium uppercase tracking-wider text-neutral-500">
+                          Equipas
+                        </div>
+                        <ul>
+                          {teamResults.map((t) => (
+                            <li key={`${t.pool_id}-${t.name}`}>
+                              <button
+                                type="button"
+                                onClick={() => goToTeam(t.pool_id, t.name)}
+                                className="block w-full px-3 py-2 text-left hover:bg-neutral-50"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Shield className="h-4 w-4 shrink-0 text-neutral-400" strokeWidth={1.6} />
+                                  <span className="truncate text-sm font-medium text-neutral-900">{t.name}</span>
+                                </div>
+                                {t.pool_name && (
+                                  <div className="ml-6 mt-0.5 truncate text-xs text-neutral-500">
+                                    {t.pool_name}
+                                  </div>
+                                )}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {playerResults.length > 0 && (
+                      <div>
+                        <div className="border-b border-neutral-100 bg-neutral-50 px-3 py-1 text-xs font-medium uppercase tracking-wider text-neutral-500">
+                          Jogadores
+                        </div>
+                        <ul>
+                          {playerResults.map((p) => (
+                            <li key={p.id} className="flex items-center gap-1 hover:bg-neutral-50">
+                              <div className="px-2">
+                                <FavoriteStar playerId={p.id} />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => goToPlayer(p.id)}
+                                className="block flex-1 py-2 pr-3 text-left"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <UserCircle2 className="h-4 w-4 shrink-0 text-neutral-400" strokeWidth={1.6} />
+                                  <span className="truncate text-sm font-medium text-neutral-900">{p.name}</span>
+                                </div>
+                                <div className="ml-6 mt-0.5 truncate text-xs text-neutral-500">
+                                  {[p.current_team, p.position_primary, p.age].filter(Boolean).join(' · ')}
+                                  {p.pool_name && <span className="text-neutral-400"> · {p.pool_name}</span>}
+                                </div>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}

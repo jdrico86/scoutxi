@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { FavoriteStar } from '@/components/FavoriteStar';
 
 type ProfileListItem = {
   id: string;
@@ -199,69 +200,68 @@ function ProfilesContent() {
           <button
             type="button"
             onClick={() => setProfilesListOpen((v) => !v)}
-            className={`flex w-full items-center justify-between px-6 py-3 text-sm font-semibold text-neutral-900 hover:bg-neutral-50 ${
-              profilesListOpen ? 'border-b border-neutral-200' : ''
-            }`}
+            className={`flex w-full items-center justify-between px-6 py-3 text-sm font-semibold text-neutral-900 hover:bg-neutral-50 ${profilesListOpen ? 'border-b border-neutral-200' : ''
+              }`}
           >
             <span>Perfis disponíveis ({profiles.length})</span>
             <span className="text-neutral-400">{profilesListOpen ? '▾' : '▸'}</span>
           </button>
           {profilesListOpen && (
-          <table className="w-full text-sm">
-            <thead className="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
-              <tr>
-                <th className="px-4 py-2">Nome</th>
-                <th className="px-4 py-2">Posições</th>
-                <th className="px-4 py-2">Métricas</th>
-                <th className="px-4 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {profiles.map((p) => {
-                const seed = p.tags?.includes('seed');
-                const entries = p.weights?.entries ?? [];
-                return (
-                  <tr key={p.id} className="border-t border-neutral-100">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-neutral-900">{p.name}</span>
-                        {seed && (
-                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
-                            seed
-                          </span>
+            <table className="w-full text-sm">
+              <thead className="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
+                <tr>
+                  <th className="px-4 py-2">Nome</th>
+                  <th className="px-4 py-2">Posições</th>
+                  <th className="px-4 py-2">Métricas</th>
+                  <th className="px-4 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {profiles.map((p) => {
+                  const seed = p.tags?.includes('seed');
+                  const entries = p.weights?.entries ?? [];
+                  return (
+                    <tr key={p.id} className="border-t border-neutral-100">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-neutral-900">{p.name}</span>
+                          {seed && (
+                            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                              seed
+                            </span>
+                          )}
+                        </div>
+                        {p.description && (
+                          <div className="mt-0.5 text-xs text-neutral-500">{p.description}</div>
                         )}
-                      </div>
-                      {p.description && (
-                        <div className="mt-0.5 text-xs text-neutral-500">{p.description}</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-neutral-600">
-                      {p.filters?.positions?.join(', ') ?? '—'}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-neutral-600">{entries.length}</td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex justify-end gap-1">
-                        <button
-                          type="button"
-                          onClick={() => router.push(`/profiles/${p.id}/edit`)}
-                          className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDuplicate(p.id)}
-                          className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
-                        >
-                          Duplicar
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-neutral-600">
+                        {p.filters?.positions?.join(', ') ?? '—'}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-neutral-600">{entries.length}</td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => router.push(`/profiles/${p.id}/edit`)}
+                            className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicate(p.id)}
+                            className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
+                          >
+                            Duplicar
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </section>
 
@@ -393,23 +393,25 @@ function ProfilesContent() {
                       <tr
                         key={p.player_id}
                         onClick={() => setExpandedRow(expanded ? null : p.player_id)}
-                        className={`cursor-pointer border-t border-neutral-100 hover:bg-neutral-50 ${
-                          expanded ? 'bg-neutral-50' : ''
-                        }`}
+                        className={`cursor-pointer border-t border-neutral-100 hover:bg-neutral-50 ${expanded ? 'bg-neutral-50' : ''
+                          }`}
                       >
                         <td className="px-4 py-3 text-neutral-500">{i + 1}</td>
                         <td className="px-4 py-3 font-semibold">{p.score.toFixed(1)}</td>
                         <td className="px-4 py-3">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              router.push(`/players/${p.player_id}`);
-                            }}
-                            className="font-medium text-neutral-900 hover:text-emerald-700 hover:underline"
-                          >
-                            {p.name}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <FavoriteStar playerId={p.player_id} />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/players/${p.player_id}`);
+                              }}
+                              className="font-medium text-neutral-900 hover:text-emerald-700 hover:underline"
+                            >
+                              {p.name}
+                            </button>
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-neutral-700">{p.current_team ?? '—'}</td>
                         <td className="px-4 py-3 text-neutral-600">{p.position_primary ?? '—'}</td>

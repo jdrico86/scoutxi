@@ -2,7 +2,8 @@
 
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Plus, Search, FileText } from 'lucide-react';
+import { X, Plus, Search, FileText, Pencil } from 'lucide-react';
+import { FavoriteStar } from '@/components/FavoriteStar';
 
 type Player = {
   id: string;
@@ -33,7 +34,6 @@ type ApplicableProfile = {
   score: number | null;
   rank: number | null;
   eligible: boolean;
-  eligibility_reason: string | null;
   total_eligible: number;
 };
 
@@ -120,6 +120,16 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   rejected: { label: 'Descartado', color: 'bg-red-100 text-red-800' },
 };
 
+const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: 'Sem estado' },
+  { value: 'tracking', label: 'A acompanhar' },
+  { value: 'scouted', label: 'Visto em jogo' },
+  { value: 'agent_contacted', label: 'Contactado agente' },
+  { value: 'in_negotiation', label: 'Em negociação' },
+  { value: 'recruited', label: 'Recrutado' },
+  { value: 'rejected', label: 'Descartado' },
+];
+
 export default function PlayerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -135,6 +145,45 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
   const [compareData, setCompareData] = useState<CompareResult | null>(null);
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareError, setCompareError] = useState<string | null>(null);
+
+  const [editingNote, setEditingNote] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [statusDraft, setStatusDraft] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+
+  const startEditingNote = () => {
+    setNoteDraft(data?.note?.note ?? '');
+    setStatusDraft(data?.note?.status ?? '');
+    setEditingNote(true);
+  };
+
+  const cancelEditingNote = () => {
+    setEditingNote(false);
+  };
+
+  const saveNote = async () => {
+    setSavingNote(true);
+    try {
+      const res = await fetch(`/api/players/${id}/note`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: statusDraft || null,
+          note: noteDraft || null,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json();
+        alert(`Erro: ${j.error}`);
+        return;
+      }
+      const fresh = await fetch(`/api/players/${id}`).then((r) => r.json());
+      setData(fresh);
+      setEditingNote(false);
+    } finally {
+      setSavingNote(false);
+    }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -258,6 +307,7 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
           >
             ← Voltar
           </button>
+
           <div className="rounded-lg border border-neutral-200 bg-white p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -271,11 +321,15 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                   {pool ? `${pool.name} ${pool.season}` : 'Pool desconhecida'}
                 </p>
               </div>
+
               <div className="flex items-center gap-2">
                 {statusInfo && (
                   <span className={`rounded-full px-3 py-1 text-xs font-medium ${statusInfo.color}`}>
                     {statusInfo.label}
                   </span>
+                )}
+                {!compareData && (
+                  <FavoriteStar playerId={id} size="lg" className="p-1.5" />
                 )}
                 {!compareData && (
                   <>
@@ -383,8 +437,9 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                           type="button"
                           onClick={() => p.eligible && setSelectedProfileId(p.profile_id)}
                           disabled={!p.eligible}
-                          className={`block w-full px-4 py-3 text-left transition-colors ${active ? 'bg-neutral-50' : 'hover:bg-neutral-50'
-                            } ${!p.eligible ? 'cursor-not-allowed opacity-60' : ''}`}
+                          className={`block w-full px-4 py-3 text-left transition-colors ${
+                            active ? 'bg-neutral-50' : 'hover:bg-neutral-50'
+                          } ${!p.eligible ? 'cursor-not-allowed opacity-60' : ''}`}
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0 flex-1">
@@ -403,9 +458,7 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                                   #{p.rank} de {p.total_eligible} elegíveis
                                 </div>
                               ) : (
-                                <div className="mt-0.5 text-xs text-neutral-400">
-                                  Não elegível{p.eligibility_reason ? ` · ${p.eligibility_reason}` : ''}
-                                </div>
+                                <div className="mt-0.5 text-xs text-neutral-400">Não elegível</div>
                               )}
                             </div>
                             <div className="shrink-0 text-right">
@@ -457,19 +510,93 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
           </section>
         )}
 
-        {(note?.note || shortlists.length > 0) && !compareData && (
+        {!compareData && (
           <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            {note?.note && (
-              <div className="rounded-lg border border-neutral-200 bg-white p-5">
+            <div className="rounded-lg border border-neutral-200 bg-white p-5">
+              <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-neutral-900">Nota</h3>
-                <p className="mt-2 whitespace-pre-wrap text-sm text-neutral-700">{note.note}</p>
-                {note.updated_at && (
-                  <p className="mt-2 text-xs text-neutral-400">
-                    Actualizada em {new Date(note.updated_at).toLocaleDateString('pt-PT')}
-                  </p>
+                {!editingNote && (
+                  <button
+                    type="button"
+                    onClick={startEditingNote}
+                    className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-800"
+                  >
+                    {note?.note || note?.status ? (
+                      <>
+                        <Pencil className="h-3 w-3" strokeWidth={2} />
+                        Editar
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="h-3 w-3" strokeWidth={2} />
+                        Adicionar nota
+                      </>
+                    )}
+                  </button>
                 )}
               </div>
-            )}
+
+              {editingNote ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-600">Estado</label>
+                    <select
+                      value={statusDraft}
+                      onChange={(e) => setStatusDraft(e.target.value)}
+                      className="mt-1 rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm"
+                    >
+                      {STATUS_OPTIONS.map((s) => (
+                        <option key={s.value} value={s.value}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-600">Nota</label>
+                    <textarea
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value)}
+                      rows={4}
+                      placeholder="Observações, contactos, próximos passos…"
+                      className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={saveNote}
+                      disabled={savingNote}
+                      className="rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                    >
+                      {savingNote ? 'A guardar…' : 'Guardar'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEditingNote}
+                      disabled={savingNote}
+                      className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs text-neutral-700"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              ) : note?.note || note?.status ? (
+                <div>
+                  {note.note && (
+                    <p className="whitespace-pre-wrap text-sm text-neutral-700">{note.note}</p>
+                  )}
+                  {note.updated_at && (
+                    <p className="mt-2 text-xs text-neutral-400">
+                      Actualizada em {new Date(note.updated_at).toLocaleDateString('pt-PT')}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-neutral-400">Sem nota.</p>
+              )}
+            </div>
+
             {shortlists.length > 0 && (
               <div className="rounded-lg border border-neutral-200 bg-white p-5">
                 <h3 className="text-sm font-semibold text-neutral-900">
@@ -610,7 +737,6 @@ function CompareSearchBar({
 
 function CompareView({ data }: { data: CompareResult }) {
   const { player_a: a, player_b: b, profile, same_pool } = data;
-
   const aByMetric = new Map(a.contributions.map((c) => [c.metric_code, c]));
   const bByMetric = new Map(b.contributions.map((c) => [c.metric_code, c]));
   const allMetrics = Array.from(new Set([...aByMetric.keys(), ...bByMetric.keys()]));
@@ -708,8 +834,8 @@ function PercentileCell({ value }: { value: number }) {
         value >= 80
           ? 'font-semibold text-emerald-700'
           : value >= 50
-            ? 'text-neutral-700'
-            : 'text-neutral-400'
+          ? 'text-neutral-700'
+          : 'text-neutral-400'
       }
     >
       {value.toFixed(1)}
@@ -813,8 +939,8 @@ function Radar({ series }: { series: RadarSeries[] }) {
   const size = 460;
   const center = size / 2;
   const radius = size / 2 - 110;
-  if (series.length === 0) return null;
 
+  if (series.length === 0) return null;
   const baseMetrics = series[0].contributions.map((c) => c.metric_code);
   const n = baseMetrics.length;
   if (n === 0) return null;
@@ -834,7 +960,6 @@ function Radar({ series }: { series: RadarSeries[] }) {
           ))}
         </div>
       )}
-
       <svg viewBox={`0 0 ${size} ${size}`} className="block" style={{ maxWidth: '100%', height: 'auto' }}>
         {ringLevels.map((level) => {
           const pts = Array.from({ length: n }, (_, i) => {

@@ -2,12 +2,20 @@
  * Parser Wyscout -> estruturas prontas para inserir no Supabase.
  *
  * Design:
- *  - Função pura: recebe buffer do XLSX, devolve objectos. Não toca na base de dados.
- *  - A persistência é feita na rota API (`/api/import/wyscout`).
- *  - Qualquer erro de estrutura é lançado; qualquer coluna ignorada ou valor vazio
- *    é registado em `warnings`.
+ * - Função pura: recebe buffer do XLSX, devolve objectos. Não toca na base de dados.
+ * - A persistência é feita na rota API (`/api/import/wyscout`).
+ * - Qualquer erro de estrutura é lançado; qualquer coluna ignorada ou valor vazio
+ *   é registado em `warnings`.
+ *
+ * Deduplicação:
+ * - O Wyscout por vezes exporta linhas duplicadas para o mesmo jogador
+ *   (mesmo nome + clube + idade) com dados ligeiramente diferentes —
+ *   provavelmente um glitch do exporter. Antes de processar, deduplicamos
+ *   por (name, current_team, age) ficando com a linha de mais minutos.
+ *   Casos como "Diogo Marques" no Lagoa vs FC Serpa (jogadores diferentes
+ *   ou transferência) NÃO são afectados — clubes diferentes mantêm linhas
+ *   separadas.
  */
-
 import * as XLSX from 'xlsx';
 import { METRIC_MAP, PLAYER_FIELD_MAP, toNumberOrNull } from './column-map';
 
@@ -36,6 +44,7 @@ export type ParseResult = {
   warnings: string[];
   unmappedColumns: string[]; // colunas que existiam no XLSX e que ignorámos
   missingColumns: string[]; // colunas que o parser espera e não encontrou
+  duplicatesRemoved: number; // linhas removidas por deduplicação (name+team+age)
 };
 
 /** Lê buffer de ficheiro XLSX e devolve estruturas prontas para persistência. */
@@ -81,10 +90,53 @@ export function parseWyscoutXlsx(buffer: ArrayBuffer | Buffer): ParseResult {
   ]);
   const unmappedColumns = [...presentColumns].filter((c) => !expectedColumns.has(c));
 
-  // Processar cada linha
-  rows.forEach((row, i) => {
-    const rowIndex = i + 2; // +1 porque 0-based, +1 por causa do header no XLSX
+  // ── Deduplicação ─────────────────────────────────────────────────────
+  // Agrupa linhas por (name, team, age) e fica com a linha de mais minutos.
+  // O Wyscout às vezes exporta duplicados com a mesma chave mas dados ligeiramente
+  // diferentes (provavelmente bug do exporter). Esta dedup acontece ANTES de
+  // criar players/stats, garantindo um único registo por jogador no resultado.
+  type IndexedRow = { row: Record<string, unknown>; rowIndex: number };
+  const dedupMap = new Map<string, IndexedRow>();
+  let duplicatesRemoved = 0;
 
+  rows.forEach((row, i) => {
+    const rowIndex = i + 2; // +1 (0-based) +1 (header)
+    const name = String(row['Jogador'] ?? '').trim();
+    if (!name) return; // linhas vazias ignoradas no loop principal a seguir
+
+    const team = String(row['Equipa'] ?? '').trim().toLowerCase();
+    const age = String(row['Idade'] ?? '').trim();
+    const key = `${name.toLowerCase()}::${team}::${age}`;
+
+    const minutesNow = toNumberOrNull(row['Minutos jogados:']) ?? 0;
+
+    const existing = dedupMap.get(key);
+    if (!existing) {
+      dedupMap.set(key, { row, rowIndex });
+      return;
+    }
+
+    duplicatesRemoved++;
+    const minutesExisting = toNumberOrNull(existing.row['Minutos jogados:']) ?? 0;
+    if (minutesNow > minutesExisting) {
+      // Esta linha tem mais minutos — substituir
+      dedupMap.set(key, { row, rowIndex });
+      warnings.push(
+        `Duplicado removido: linha ${existing.rowIndex} (${minutesExisting} min) substituída por linha ${rowIndex} (${minutesNow} min) — ${name} / ${row['Equipa'] ?? '—'}.`
+      );
+    } else {
+      // Esta linha tem menos ou iguais minutos — descartar
+      warnings.push(
+        `Duplicado removido: linha ${rowIndex} (${minutesNow} min) descartada — ${name} / ${row['Equipa'] ?? '—'} (mantida linha ${existing.rowIndex} com ${minutesExisting} min).`
+      );
+    }
+  });
+
+  // Lista deduplicada, ordenada por rowIndex original
+  const dedupedRows = Array.from(dedupMap.values()).sort((a, b) => a.rowIndex - b.rowIndex);
+
+  // ── Processar linhas (já deduplicadas) ───────────────────────────────
+  dedupedRows.forEach(({ row, rowIndex }) => {
     const name = String(row['Jogador'] ?? '').trim();
     if (!name) {
       warnings.push(`Linha ${rowIndex}: sem nome de jogador, ignorada.`);
@@ -142,5 +194,6 @@ export function parseWyscoutXlsx(buffer: ArrayBuffer | Buffer): ParseResult {
     warnings,
     unmappedColumns,
     missingColumns,
+    duplicatesRemoved,
   };
 }

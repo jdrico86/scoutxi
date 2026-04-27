@@ -131,6 +131,8 @@ export const METRIC_MAP: Record<string, string> = {
   'Jogos sem sofrer golos': 'clean_sheets',
   'Defesas, %': 'save_pct',
   'Golos expectáveis defendidos por 90´': 'xg_prevented_90', // nota o ´ (acento agudo) no fim
+  'Saídas/90': 'gk_exits_90',
+  
 };
 
 // ── helpers ──────────────────────────────────────────────────────────────

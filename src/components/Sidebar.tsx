@@ -11,13 +11,17 @@ import {
   UserCircle2,
   Users,
   Shield,
+  LogOut,
 } from 'lucide-react';
 import { FavoriteStar } from '@/components/FavoriteStar';
+import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
+import type { User } from '@supabase/supabase-js';
 
 type NavItem = {
   label: string;
   href: string;
   icon: React.ElementType;
+  adminOnly?: boolean;
 };
 
 const NAV: NavItem[] = [
@@ -25,7 +29,7 @@ const NAV: NavItem[] = [
   { label: 'Equipas', href: '/teams', icon: Users },
   { label: 'Melhor 11', href: '/best-eleven', icon: Trophy },
   { label: 'Shortlists', href: '/shortlists', icon: ClipboardList },
-  { label: 'Importar', href: '/import', icon: Upload },
+  { label: 'Importar', href: '/import', icon: Upload, adminOnly: true },
 ];
 
 type PlayerHit = {
@@ -52,8 +56,51 @@ export function Sidebar() {
   const [showResults, setShowResults] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  const [user, setUser] = useState<User | null>(null);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const supabase = createSupabaseBrowserClient();
+
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Obter user actual + admin flag
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadUser() {
+      const { data } = await supabase.auth.getUser();
+      if (cancelled) return;
+      setUser(data.user);
+
+      if (data.user) {
+        try {
+          const res = await fetch('/api/me');
+          if (res.ok) {
+            const json = await res.json();
+            if (!cancelled) setIsAdmin(json.user?.is_admin ?? false);
+          }
+        } catch {
+          // não bloqueia render
+        }
+      } else {
+        setIsAdmin(false);
+      }
+    }
+
+    loadUser();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) return;
+      setUser(session?.user ?? null);
+      if (!session?.user) setIsAdmin(false);
+      else loadUser();
+    });
+
+    return () => {
+      cancelled = true;
+      listener.subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   // Fechar dropdown ao clicar fora
   useEffect(() => {
@@ -111,7 +158,14 @@ export function Sidebar() {
     router.push(`/teams?${params}`);
   };
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
+    router.refresh();
+  };
+
   const hasResults = playerResults.length > 0 || teamResults.length > 0;
+  const visibleNav = NAV.filter((item) => !item.adminOnly || isAdmin);
 
   return (
     <aside className="fixed left-0 top-0 bottom-0 z-20 flex w-60 flex-col border-r border-neutral-200 bg-white">
@@ -130,7 +184,7 @@ export function Sidebar() {
       {/* Navegação */}
       <nav className="flex-1 px-3 py-4">
         <ul className="space-y-0.5">
-          {NAV.map((item) => {
+          {visibleNav.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
             return (
@@ -245,9 +299,26 @@ export function Sidebar() {
         </div>
       </nav>
 
-      {/* Footer */}
-      <div className="border-t border-neutral-200 px-5 py-3 text-xs text-neutral-400">
-        v0.4 · Liga 3 · CdP · Sub-23
+      {/* Footer com user e botão sair */}
+      <div className="border-t border-neutral-200">
+        {user && (
+          <div className="px-3 py-3">
+            <div className="mb-2 px-2 text-xs text-neutral-500 truncate" title={user.email ?? ''}>
+              {user.email}
+            </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-xs text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900"
+            >
+              <LogOut className="h-3.5 w-3.5" strokeWidth={1.8} />
+              <span>Sair</span>
+            </button>
+          </div>
+        )}
+        <div className="border-t border-neutral-200 px-5 py-2 text-xs text-neutral-400">
+          v0.5 · Ligas Portuguesas
+        </div>
       </div>
     </aside>
   );

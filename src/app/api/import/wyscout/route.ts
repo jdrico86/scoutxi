@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { parseWyscoutXlsx } from '@/lib/wyscout/parser';
 import type { Database } from '@/lib/supabase/database.types';
+import { getAuthUser } from '@/lib/supabase/server';
 
 // Runtime Node (não Edge) — precisamos de Buffer e xlsx lê melhor em Node
 export const runtime = 'nodejs';
@@ -29,6 +30,26 @@ const BATCH_STATS = 1000;
  *     e recria, mantém metadados actualizados.
  */
 export async function POST(req: NextRequest) {
+  // ── Verificar admin ────────────────────────────────────────────────────
+  const user = await getAuthUser();
+  if (!user) {
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+  }
+  const checkUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const checkKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (checkUrl && checkKey) {
+    const checkClient = createClient(checkUrl, checkKey, { auth: { persistSession: false } });
+    const { data: allowedRow } = await checkClient
+      .from('allowed_users')
+      .select('is_admin')
+      .eq('email', user.email ?? '')
+      .maybeSingle();
+    const isAdmin = (allowedRow as { is_admin?: boolean } | null)?.is_admin ?? false;
+    if (!isAdmin) {
+      return NextResponse.json({ error: 'Apenas administradores podem importar.' }, { status: 403 });
+    }
+  }
+
   // ── Chaves Supabase ────────────────────────────────────────────────────
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

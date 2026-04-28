@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import type { Database } from '@/lib/supabase/database.types';
 import { loadProfile } from '@/lib/scouting/db-helpers';
 import { scoreSpecificPlayers, buildSnapshotEntries } from '@/lib/scouting/shortlist-helpers';
+import { getAuthUser } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -19,18 +19,22 @@ const UpdateShortlistSchema = z.object({
 // ── GET /api/shortlists/[id] ─────────────────────────────────────────────
 // Devolve a shortlist + jogadores com dados completos + snapshot scores
 export async function GET(_: NextRequest, { params }: Params) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const { id } = await params;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
 
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
 
-  // Shortlist
+  // Shortlist (filtra por owner — só vês as tuas)
   const { data: shortlist, error: slErr } = await supabase
     .from('shortlists')
     .select('id, name, pool_id, profile_id, created_at')
     .eq('id', id)
+    .eq('owner_id', user.id)
     .maybeSingle();
   if (slErr) return NextResponse.json({ error: slErr.message }, { status: 500 });
   if (!shortlist) return NextResponse.json({ error: 'Shortlist não encontrada.' }, { status: 404 });
@@ -119,6 +123,9 @@ export async function GET(_: NextRequest, { params }: Params) {
 
 // ── PUT /api/shortlists/[id] ─────────────────────────────────────────────
 export async function PUT(req: NextRequest, { params }: Params) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const { id } = await params;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -131,11 +138,15 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: `Input inválido: ${(err as Error).message}` }, { status: 400 });
   }
 
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
 
-  // Rename
+  // Rename (verifica owner)
   if (body.name) {
-    const { error } = await supabase.from('shortlists').update({ name: body.name }).eq('id', id);
+    const { error } = await supabase
+      .from('shortlists')
+      .update({ name: body.name })
+      .eq('id', id)
+      .eq('owner_id', user.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
@@ -145,6 +156,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       .from('shortlists')
       .select('pool_id, profile_id')
       .eq('id', id)
+      .eq('owner_id', user.id)
       .maybeSingle();
     if (!shortlist?.pool_id || !shortlist.profile_id) {
       return NextResponse.json({ error: 'Shortlist sem pool ou perfil — não dá para recalcular.' }, { status: 400 });
@@ -191,14 +203,21 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
 // ── DELETE /api/shortlists/[id] ──────────────────────────────────────────
 export async function DELETE(_: NextRequest, { params }: Params) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const { id } = await params;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
 
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
-  // shortlist_players tem ON DELETE CASCADE, apaga sozinho
-  const { error } = await supabase.from('shortlists').delete().eq('id', id);
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
+  // shortlist_players tem ON DELETE CASCADE, apaga sozinho. Filtra por owner.
+  const { error } = await supabase
+    .from('shortlists')
+    .delete()
+    .eq('id', id)
+    .eq('owner_id', user.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

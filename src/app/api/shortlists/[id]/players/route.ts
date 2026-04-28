@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import type { Database } from '@/lib/supabase/database.types';
+import { getAuthUser } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 
@@ -13,6 +13,9 @@ const AddPlayerSchema = z.object({
 
 // ── POST /api/shortlists/[id]/players — adicionar um player ──────────────
 export async function POST(req: NextRequest, { params }: Params) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const { id } = await params;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -25,7 +28,16 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: `Input inválido: ${(err as Error).message}` }, { status: 400 });
   }
 
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
+
+  // Verificar que a shortlist pertence ao user
+  const { data: sl } = await supabase
+    .from('shortlists')
+    .select('id')
+    .eq('id', id)
+    .eq('owner_id', user.id)
+    .maybeSingle();
+  if (!sl) return NextResponse.json({ error: 'Shortlist não encontrada.' }, { status: 404 });
 
   // Insert ignorando duplicado (PK composta evita repetidos)
   const { error } = await supabase
@@ -44,6 +56,9 @@ export async function POST(req: NextRequest, { params }: Params) {
 
 // ── DELETE /api/shortlists/[id]/players?player_id=xxx ────────────────────
 export async function DELETE(req: NextRequest, { params }: Params) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const { id } = await params;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -52,7 +67,17 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const playerId = req.nextUrl.searchParams.get('player_id');
   if (!playerId) return NextResponse.json({ error: 'player_id em query string obrigatório.' }, { status: 400 });
 
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
+
+  // Verificar que a shortlist pertence ao user
+  const { data: sl } = await supabase
+    .from('shortlists')
+    .select('id')
+    .eq('id', id)
+    .eq('owner_id', user.id)
+    .maybeSingle();
+  if (!sl) return NextResponse.json({ error: 'Shortlist não encontrada.' }, { status: 404 });
+
   const { error } = await supabase
     .from('shortlist_players')
     .delete()

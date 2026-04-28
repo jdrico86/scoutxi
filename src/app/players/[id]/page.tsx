@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, Plus, Search, FileText, Pencil } from 'lucide-react';
 import { FavoriteStar } from '@/components/FavoriteStar';
+import { ShortlistMenu } from '@/components/ShortlistMenu';
 
 type Player = {
   id: string;
@@ -330,6 +331,20 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                 )}
                 {!compareData && (
                   <FavoriteStar playerId={id} size="lg" className="p-1.5" />
+                )}
+                {!compareData && (
+                  <ShortlistMenu
+                    playerId={id}
+                    currentShortlistIds={shortlists.map((s) => s.shortlist_id)}
+                    onChange={() => {
+                      // recarrega data para refrescar a lista "Em shortlists" e a estrela
+                      fetch(`/api/players/${id}`)
+                        .then((r) => r.json())
+                        .then((j) => {
+                          if (!j.error) setData(j);
+                        });
+                    }}
+                  />
                 )}
                 {!compareData && (
                   <>

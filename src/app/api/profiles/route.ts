@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import type { Database, Json } from '@/lib/supabase/database.types';
+import { getAuthUser } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 
@@ -56,15 +56,21 @@ function validateWeightSum(entries: Array<{ weight: number }>): string | null {
 }
 
 // ── GET /api/profiles ────────────────────────────────────────────────────
+// Devolve perfis seed (globais, owner_id=null) + perfis do user actual.
 export async function GET() {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
 
+  // Filtro: owner_id IS NULL (seeds globais) OR owner_id = user actual
   const { data, error } = await supabase
     .from('scouting_profiles')
     .select('id, name, description, tags, created_at, updated_at, filters, weights')
+    .or(`owner_id.is.null,owner_id.eq.${user.id}`)
     .order('name');
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ profiles: data ?? [] });
@@ -72,6 +78,9 @@ export async function GET() {
 
 // ── POST /api/profiles ───────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
@@ -83,20 +92,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Input inválido: ${(err as Error).message}` }, { status: 400 });
   }
 
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
 
   // Modo clone
   if ('clone_from_id' in body) {
+    // Source pode ser seed global ou um perfil do user (não pode ser de outro user)
     const { data: source, error: srcErr } = await supabase
       .from('scouting_profiles')
       .select('*')
       .eq('id', body.clone_from_id)
+      .or(`owner_id.is.null,owner_id.eq.${user.id}`)
       .maybeSingle();
     if (srcErr) return NextResponse.json({ error: srcErr.message }, { status: 500 });
     if (!source) return NextResponse.json({ error: 'Perfil origem não encontrado.' }, { status: 404 });
 
     const newName = body.new_name ?? `${source.name} (cópia)`;
-    const cloneTags = (source.tags ?? []).filter((t) => t !== 'seed');
+    const cloneTags = (source.tags ?? []).filter((t: string) => t !== 'seed');
 
     const { data: created, error: insErr } = await supabase
       .from('scouting_profiles')
@@ -106,6 +117,7 @@ export async function POST(req: NextRequest) {
         filters: source.filters,
         weights: source.weights,
         tags: cloneTags.length > 0 ? cloneTags : null,
+        owner_id: user.id,
       })
       .select('id, name')
       .single();
@@ -122,9 +134,10 @@ export async function POST(req: NextRequest) {
     .insert({
       name: body.name,
       description: body.description ?? null,
-      filters: body.filters as unknown as Json,
-      weights: body.weights as unknown as Json,
+      filters: body.filters,
+      weights: body.weights,
       tags: body.tags ?? null,
+      owner_id: user.id,
     })
     .select('id, name')
     .single();

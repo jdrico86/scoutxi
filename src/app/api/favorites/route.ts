@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import type { Database } from '@/lib/supabase/database.types';
+import { getAuthUser } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 
@@ -11,12 +11,19 @@ const AddFavSchema = z.object({
   player_id: z.string().uuid(),
 });
 
-// Helper: garante que existe shortlist "Favoritos" e devolve o ID.
-async function ensureFavoritesShortlist(supabase: ReturnType<typeof createClient<Database>>): Promise<string> {
+/**
+ * Garante que existe shortlist "Favoritos" para o user dado e devolve o ID.
+ * Cada user tem a sua própria shortlist Favoritos (owner_id = user.id).
+ */
+async function ensureFavoritesShortlist(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<string> {
   const { data: existing } = await supabase
     .from('shortlists')
     .select('id')
     .eq('name', FAVORITES_NAME)
+    .eq('owner_id', userId)
     .is('pool_id', null)
     .is('profile_id', null)
     .maybeSingle();
@@ -25,7 +32,12 @@ async function ensureFavoritesShortlist(supabase: ReturnType<typeof createClient
 
   const { data: created, error } = await supabase
     .from('shortlists')
-    .insert({ name: FAVORITES_NAME, pool_id: null, profile_id: null })
+    .insert({
+      name: FAVORITES_NAME,
+      pool_id: null,
+      profile_id: null,
+      owner_id: userId,
+    })
     .select('id')
     .single();
 
@@ -33,16 +45,19 @@ async function ensureFavoritesShortlist(supabase: ReturnType<typeof createClient
   return created.id;
 }
 
-// GET /api/favorites — devolve { shortlist_id, player_ids }
+// GET /api/favorites — devolve { shortlist_id, player_ids } do user actual
 export async function GET() {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
 
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
 
   try {
-    const shortlistId = await ensureFavoritesShortlist(supabase);
+    const shortlistId = await ensureFavoritesShortlist(supabase, user.id);
 
     const { data: rows, error } = await supabase
       .from('shortlist_players')
@@ -62,6 +77,9 @@ export async function GET() {
 
 // POST /api/favorites { player_id }
 export async function POST(req: NextRequest) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
@@ -73,10 +91,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Input inválido: ${(err as Error).message}` }, { status: 400 });
   }
 
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
 
   try {
-    const shortlistId = await ensureFavoritesShortlist(supabase);
+    const shortlistId = await ensureFavoritesShortlist(supabase, user.id);
 
     const { error } = await supabase
       .from('shortlist_players')
@@ -97,6 +115,9 @@ export async function POST(req: NextRequest) {
 
 // DELETE /api/favorites?player_id=xxx
 export async function DELETE(req: NextRequest) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
@@ -104,10 +125,10 @@ export async function DELETE(req: NextRequest) {
   const playerId = req.nextUrl.searchParams.get('player_id');
   if (!playerId) return NextResponse.json({ error: 'player_id obrigatório.' }, { status: 400 });
 
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
 
   try {
-    const shortlistId = await ensureFavoritesShortlist(supabase);
+    const shortlistId = await ensureFavoritesShortlist(supabase, user.id);
 
     const { error } = await supabase
       .from('shortlist_players')

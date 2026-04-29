@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import type { Database, Json } from '@/lib/supabase/database.types';
+import { getAuthUser } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
-
-type ProfileUpdate = Database['public']['Tables']['scouting_profiles']['Update'];
 
 const FiltersSchema = z
   .object({
@@ -46,17 +44,22 @@ const UpdateProfileSchema = z
 type Params = { params: Promise<{ id: string }> };
 
 // ── GET /api/profiles/[id] ───────────────────────────────────────────────
+// Lê seeds globais (owner_id=null) ou perfis do user actual.
 export async function GET(_: NextRequest, { params }: Params) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const { id } = await params;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
 
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
   const { data, error } = await supabase
     .from('scouting_profiles')
     .select('*')
     .eq('id', id)
+    .or(`owner_id.is.null,owner_id.eq.${user.id}`)
     .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Perfil não encontrado.' }, { status: 404 });
@@ -64,7 +67,11 @@ export async function GET(_: NextRequest, { params }: Params) {
 }
 
 // ── PUT /api/profiles/[id] ───────────────────────────────────────────────
+// Só edita perfis do user actual. Seeds globais são imutáveis (clonar primeiro).
 export async function PUT(req: NextRequest, { params }: Params) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const { id } = await params;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -87,19 +94,39 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
   }
 
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
 
-  const update: ProfileUpdate = { updated_at: new Date().toISOString() };
+  // Verificar que o perfil existe e pertence ao user (não é seed global nem de outro)
+  const { data: existing } = await supabase
+    .from('scouting_profiles')
+    .select('id, owner_id')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (!existing) return NextResponse.json({ error: 'Perfil não encontrado.' }, { status: 404 });
+  if (existing.owner_id === null) {
+    return NextResponse.json(
+      { error: 'Perfis seed são imutáveis. Clona o perfil para criar uma versão tua.' },
+      { status: 403 }
+    );
+  }
+  if (existing.owner_id !== user.id) {
+    return NextResponse.json({ error: 'Sem permissão para editar este perfil.' }, { status: 403 });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const update: Record<string, any> = { updated_at: new Date().toISOString() };
   if (body.name !== undefined) update.name = body.name;
   if (body.description !== undefined) update.description = body.description;
-  if (body.filters !== undefined) update.filters = body.filters as unknown as Json;
-  if (body.weights !== undefined) update.weights = body.weights as unknown as Json;
+  if (body.filters !== undefined) update.filters = body.filters;
+  if (body.weights !== undefined) update.weights = body.weights;
   if (body.tags !== undefined) update.tags = body.tags;
 
   const { data, error } = await supabase
     .from('scouting_profiles')
     .update(update)
     .eq('id', id)
+    .eq('owner_id', user.id)
     .select('id, name')
     .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -108,14 +135,41 @@ export async function PUT(req: NextRequest, { params }: Params) {
 }
 
 // ── DELETE /api/profiles/[id] ────────────────────────────────────────────
+// Só apaga perfis do user actual. Seeds globais são imutáveis.
 export async function DELETE(_: NextRequest, { params }: Params) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const { id } = await params;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
 
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
-  const { error } = await supabase.from('scouting_profiles').delete().eq('id', id);
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
+
+  // Verificar que pertence ao user
+  const { data: existing } = await supabase
+    .from('scouting_profiles')
+    .select('owner_id')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (!existing) return NextResponse.json({ error: 'Perfil não encontrado.' }, { status: 404 });
+  if (existing.owner_id === null) {
+    return NextResponse.json(
+      { error: 'Perfis seed são imutáveis. Não podem ser apagados.' },
+      { status: 403 }
+    );
+  }
+  if (existing.owner_id !== user.id) {
+    return NextResponse.json({ error: 'Sem permissão para apagar este perfil.' }, { status: 403 });
+  }
+
+  const { error } = await supabase
+    .from('scouting_profiles')
+    .delete()
+    .eq('id', id)
+    .eq('owner_id', user.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

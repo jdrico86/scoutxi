@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import type { Database } from '@/lib/supabase/database.types';
 import { loadPoolData, profileRowToProfile } from '@/lib/scouting/db-helpers';
 import { scoreProfile } from '@/lib/scouting/scorer';
+import { getAuthUser } from '@/lib/supabase/server';
 
 type ProfileFilters = {
   positions?: string[];
@@ -39,12 +39,15 @@ type Params = { params: Promise<{ id: string }> };
 
 // GET /api/players/[id]
 export async function GET(_: NextRequest, { params }: Params) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const { id } = await params;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
 
-  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
 
   // 1. Player
   const { data: player, error: pErr } = await supabase
@@ -68,19 +71,15 @@ export async function GET(_: NextRequest, { params }: Params) {
     .select('metric_code, value, metric_source')
     .eq('player_id', id);
 
-  // 4. Nota global
+  // 4. Nota do user actual
   const { data: noteData } = await supabase
     .from('player_notes')
     .select('note, status, contact_info, updated_at')
     .eq('player_id', id)
+    .eq('owner_id', user.id)
     .maybeSingle();
 
-  // 5. Shortlists em que o jogador está
-  const { data: spRows } = await supabase
-    .from('shortlist_players')
-    .select('shortlist_id, snapshot_score, snapshot_rank')
-    .eq('player_id', id);
-
+  // 5. Shortlists em que o jogador está (apenas as do user actual)
   let shortlists: Array<{
     shortlist_id: string;
     shortlist_name: string | null;
@@ -88,19 +87,30 @@ export async function GET(_: NextRequest, { params }: Params) {
     snapshot_rank: number | null;
   }> = [];
 
-  if (spRows && spRows.length > 0) {
-    const slIds = spRows.map((r) => r.shortlist_id);
-    const { data: slData } = await supabase
-      .from('shortlists')
-      .select('id, name')
-      .in('id', slIds);
-    const slMap = new Map((slData ?? []).map((s) => [s.id, s.name]));
-    shortlists = spRows.map((r) => ({
-      shortlist_id: r.shortlist_id,
-      shortlist_name: slMap.get(r.shortlist_id) ?? null,
-      snapshot_score: r.snapshot_score,
-      snapshot_rank: r.snapshot_rank,
-    }));
+  // Primeiro, IDs das shortlists do user
+  const { data: ownedSl } = await supabase
+    .from('shortlists')
+    .select('id, name')
+    .eq('owner_id', user.id);
+
+  const ownedIds = (ownedSl ?? []).map((s) => s.id);
+
+  if (ownedIds.length > 0) {
+    const { data: spRows } = await supabase
+      .from('shortlist_players')
+      .select('shortlist_id, snapshot_score, snapshot_rank')
+      .eq('player_id', id)
+      .in('shortlist_id', ownedIds);
+
+    if (spRows && spRows.length > 0) {
+      const slMap = new Map((ownedSl ?? []).map((s) => [s.id, s.name]));
+      shortlists = spRows.map((r) => ({
+        shortlist_id: r.shortlist_id,
+        shortlist_name: slMap.get(r.shortlist_id) ?? null,
+        snapshot_score: r.snapshot_score,
+        snapshot_rank: r.snapshot_rank,
+      }));
+    }
   }
 
   // 6. Perfis aplicáveis

@@ -1,10 +1,27 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Upload, Target, ClipboardList } from 'lucide-react';
 
 export default function HomeShortcuts() {
   const router = useRouter();
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/me')
+      .then((r) => r.json())
+      .then((json) => {
+        if (!cancelled) setIsAdmin(json.user?.is_admin ?? false);
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <section>
@@ -12,12 +29,14 @@ export default function HomeShortcuts() {
         Atalhos
       </h2>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <Shortcut
-          icon={Upload}
-          label="Importar dados"
-          description="Fazer upload de ficheiros Wyscout XLSX."
-          onClick={() => router.push('/import')}
-        />
+        {isAdmin && (
+          <Shortcut
+            icon={Upload}
+            label="Importar dados"
+            description="Fazer upload de ficheiros Wyscout XLSX."
+            onClick={() => router.push('/import')}
+          />
+        )}
         <Shortcut
           icon={Target}
           label="Aplicar perfis"

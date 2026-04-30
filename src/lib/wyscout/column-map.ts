@@ -19,6 +19,7 @@
 export type PlayerFieldKey =
   | 'name'
   | 'current_team'
+  | 'team_in_period'
   | 'position_primary'
   | 'positions_secondary'
   | 'age'
@@ -42,6 +43,10 @@ export const PLAYER_FIELD_MAP: Record<
 > = {
   'Jogador': { field: 'name', transform: (v) => String(v ?? '').trim() },
   'Equipa': { field: 'current_team', transform: (v) => toStringOrNull(v) },
+  'Equipa dentro de um período de tempo seleccionado': {
+    field: 'team_in_period',
+    transform: (v) => toStringOrNull(v),
+  },
   'Posição': {
     field: 'position_primary',
     transform: (v) => {

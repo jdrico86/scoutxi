@@ -151,7 +151,7 @@ export function parseWyscoutXlsx(buffer: ArrayBuffer | Buffer): ParseResult {
     const equipaRaw = String(row['Equipa'] ?? '').trim();
     const equipaPeriodoRaw = String(row['Equipa dentro de um período de tempo seleccionado'] ?? '').trim();
     if (!equipaRaw && !equipaPeriodoRaw) {
-      warnings.push(`Linha ${rowIndex}: ${name} — sem equipa atribuída em ambas as colunas, ignorado.`);
+      warnings.push(`Linha ${rowIndex}: ${name} — sem equipa atribuída, ignorado.`);
       return;
     }
 
@@ -192,7 +192,7 @@ export function parseWyscoutXlsx(buffer: ArrayBuffer | Buffer): ParseResult {
       positionsRaw,
     });
 
-    // Stats: uma linha por métrica mapeada
+    // Stats: uma linha por métrica mapeada.
     // Associamos as stats à equipa onde o jogador jogou no contexto deste pool
     // (team_in_period), não ao clube actual. Para o Brendo Marins que está no "365"
     // mas jogou pelo Marialvas, as stats ficam ligadas a "Marialvas".

@@ -143,12 +143,35 @@ export function parseWyscoutXlsx(buffer: ArrayBuffer | Buffer): ParseResult {
       return;
     }
 
+    // Skip linhas sem qualquer indicação de equipa.
+    // O Wyscout às vezes exporta linhas malformadas para nomes abreviados
+    // (ex: "R. Trotta") sem clube atribuído. Importar isto cria registos
+    // órfãos sem utilidade. Verificamos as duas colunas porque uma pode
+    // estar preenchida e outra não.
+    const equipaRaw = String(row['Equipa'] ?? '').trim();
+    const equipaPeriodoRaw = String(row['Equipa dentro de um período de tempo seleccionado'] ?? '').trim();
+    if (!equipaRaw && !equipaPeriodoRaw) {
+      warnings.push(`Linha ${rowIndex}: ${name} — sem equipa atribuída em ambas as colunas, ignorado.`);
+      return;
+    }
+
     // Monta objecto `players`
     const playerData: Record<string, unknown> = {};
     for (const [col, { field, transform }] of Object.entries(PLAYER_FIELD_MAP)) {
       if (!presentColumns.has(col)) continue;
       const val = transform(row[col]);
       if (val !== undefined) playerData[field] = val;
+    }
+
+    // Fallbacks: garantir que current_team e team_in_period nunca ficam ambos null.
+    // Se o XLSX é antigo (sem 'Equipa dentro de um período...'), team_in_period é null —
+    // copia de current_team. Se é caso raro de só ter team_in_period preenchido,
+    // copia para current_team. Compatível com exports Wyscout antigos e novos.
+    if (!playerData.team_in_period && playerData.current_team) {
+      playerData.team_in_period = playerData.current_team;
+    }
+    if (!playerData.current_team && playerData.team_in_period) {
+      playerData.current_team = playerData.team_in_period;
     }
 
     // positions_secondary: extraído da coluna Posição
@@ -170,7 +193,10 @@ export function parseWyscoutXlsx(buffer: ArrayBuffer | Buffer): ParseResult {
     });
 
     // Stats: uma linha por métrica mapeada
-    const team = typeof playerData.current_team === 'string' ? playerData.current_team : null;
+    // Associamos as stats à equipa onde o jogador jogou no contexto deste pool
+    // (team_in_period), não ao clube actual. Para o Brendo Marins que está no "365"
+    // mas jogou pelo Marialvas, as stats ficam ligadas a "Marialvas".
+    const team = typeof playerData.team_in_period === 'string' ? playerData.team_in_period : null;
     for (const [col, code] of Object.entries(METRIC_MAP)) {
       if (!presentColumns.has(col)) continue;
       const raw = row[col];

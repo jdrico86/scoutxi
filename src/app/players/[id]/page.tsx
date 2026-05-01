@@ -10,6 +10,7 @@ type Player = {
   id: string;
   name: string;
   current_team: string | null;
+  team_in_period: string | null;
   position_primary: string | null;
   positions_secondary: string[] | null;
   age: number | null;
@@ -314,10 +315,21 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
               <div>
                 <h1 className="text-3xl font-semibold text-neutral-900">{player.name}</h1>
                 <p className="mt-1 text-sm text-neutral-600">
-                  {[player.current_team, player.position_primary, player.age ? `${player.age} anos` : null]
+                  {[
+                    player.team_in_period ?? player.current_team,
+                    player.position_primary,
+                    player.age ? `${player.age} anos` : null,
+                  ]
                     .filter(Boolean)
                     .join(' · ')}
                 </p>
+                {player.current_team &&
+                  player.team_in_period &&
+                  player.current_team !== player.team_in_period && (
+                    <p className="mt-1 text-xs text-neutral-500">
+                      Actualmente em <span className="font-medium text-neutral-700">{player.current_team}</span>
+                    </p>
+                  )}
                 <p className="mt-1 text-xs text-neutral-500">
                   {pool ? `${pool.name} ${pool.season}` : 'Pool desconhecida'}
                 </p>

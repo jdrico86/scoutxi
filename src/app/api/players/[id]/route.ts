@@ -201,6 +201,7 @@ export async function GET(_: NextRequest, { params }: Params) {
         id: player.id,
         name: player.name,
         current_team: player.current_team,
+        team_in_period: player.team_in_period,
         position_primary: player.position_primary,
         positions_secondary: player.positions_secondary,
         age: player.age,

@@ -688,16 +688,18 @@ function SlotPickerModal({
   onClose: () => void;
   onAssign: (playerId: string, slotId: string, isInSquad: boolean) => Promise<void>;
 }) {
-  const compatibleInSquad = useMemo(
-    () =>
-      squadPlayers.filter(
-        (p) =>
-          p.position_primary &&
-          slot.accepted_positions.includes(p.position_primary) &&
-          p.slot !== slot.id
-      ),
-    [squadPlayers, slot]
-  );
+  const isCompatible = (pos: string | null | undefined) =>
+    pos != null && slot.accepted_positions.includes(pos);
+
+  const squadPlayersForSlot = useMemo(() => {
+    const others = squadPlayers.filter((p) => p.slot !== slot.id);
+    return [...others].sort((a, b) => {
+      const ac = isCompatible(a.position_primary) ? 0 : 1;
+      const bc = isCompatible(b.position_primary) ? 0 : 1;
+      return ac - bc;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [squadPlayers, slot]);
 
   const [q, setQ] = useState('');
   const [results, setResults] = useState<SearchHit[]>([]);
@@ -706,7 +708,6 @@ function SlotPickerModal({
 
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
-    // q < 2 → não corremos busca; resultados anteriores ficam escondidos pelo JSX
     if (q.trim().length < 2) return;
     timer.current = setTimeout(async () => {
       setSearching(true);
@@ -714,9 +715,13 @@ function SlotPickerModal({
         const res = await fetch(`/api/players/search?q=${encodeURIComponent(q.trim())}`);
         const j = await res.json();
         const hits: SearchHit[] = j.players ?? [];
-        setResults(
-          hits.filter((h) => h.position_primary && slot.accepted_positions.includes(h.position_primary))
-        );
+        // Mostramos todos os hits — só ordenamos: compatíveis primeiro, não-naturais depois.
+        const sorted = [...hits].sort((a, b) => {
+          const ac = a.position_primary && slot.accepted_positions.includes(a.position_primary) ? 0 : 1;
+          const bc = b.position_primary && slot.accepted_positions.includes(b.position_primary) ? 0 : 1;
+          return ac - bc;
+        });
+        setResults(sorted);
       } finally {
         setSearching(false);
       }
@@ -734,35 +739,41 @@ function SlotPickerModal({
       <div className="space-y-4">
         <div>
           <div className="mb-1.5 text-xs font-medium uppercase tracking-wider text-neutral-500">
-            Da equipa ({compatibleInSquad.length})
+            Da equipa ({squadPlayersForSlot.length})
           </div>
-          {compatibleInSquad.length === 0 ? (
-            <p className="text-xs text-neutral-500">Nenhum jogador da equipa aceita este slot.</p>
+          {squadPlayersForSlot.length === 0 ? (
+            <p className="text-xs text-neutral-500">Sem outros jogadores na equipa.</p>
           ) : (
             <ul className="max-h-48 space-y-1 overflow-y-auto">
-              {compatibleInSquad.map((p) => (
-                <li key={p.player_id}>
-                  <button
-                    type="button"
-                    onClick={() => onAssign(p.player_id, slot.id, true)}
-                    className="flex w-full items-center justify-between gap-2 rounded-md border border-neutral-200 px-3 py-2 text-left text-sm hover:bg-neutral-50"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium text-neutral-900">{p.name}</div>
-                      <div className="truncate text-xs text-neutral-500">
-                        {[p.team_in_period ?? p.current_team, p.position_primary]
-                          .filter(Boolean)
-                          .join(' · ')}
+              {squadPlayersForSlot.map((p) => {
+                const compat = isCompatible(p.position_primary);
+                return (
+                  <li key={p.player_id}>
+                    <button
+                      type="button"
+                      onClick={() => onAssign(p.player_id, slot.id, true)}
+                      className="flex w-full items-center justify-between gap-2 rounded-md border border-neutral-200 px-3 py-2 text-left text-sm hover:bg-neutral-50"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate font-medium text-neutral-900">{p.name}</span>
+                          <CompatibilityBadge compatible={compat} />
+                        </div>
+                        <div className="truncate text-xs text-neutral-500">
+                          {[p.team_in_period ?? p.current_team, p.position_primary]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </div>
                       </div>
-                    </div>
-                    {p.is_starter && p.slot && (
-                      <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
-                        actual: {p.slot}
-                      </span>
-                    )}
-                  </button>
-                </li>
-              ))}
+                      {p.is_starter && p.slot && (
+                        <span className="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">
+                          actual: {p.slot}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
@@ -790,13 +801,12 @@ function SlotPickerModal({
               {searching ? (
                 <div className="px-3 py-2 text-xs text-neutral-500">A procurar…</div>
               ) : results.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-neutral-500">
-                  Sem resultados compatíveis com este slot.
-                </div>
+                <div className="px-3 py-2 text-xs text-neutral-500">Sem resultados.</div>
               ) : (
                 <ul>
                   {results.map((p) => {
                     const already = inSquadIds.has(p.id);
+                    const compat = isCompatible(p.position_primary);
                     return (
                       <li key={p.id}>
                         <button
@@ -806,7 +816,10 @@ function SlotPickerModal({
                           className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-medium text-neutral-900">{p.name}</div>
+                            <div className="flex items-center gap-2">
+                              <span className="truncate text-sm font-medium text-neutral-900">{p.name}</span>
+                              <CompatibilityBadge compatible={compat} />
+                            </div>
                             <div className="truncate text-xs text-neutral-500">
                               {[p.current_team, p.position_primary, p.age].filter(Boolean).join(' · ')}
                               {p.pool_name && (
@@ -969,4 +982,16 @@ function ModalShell({
 
 function truncate(s: string, n: number) {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+function CompatibilityBadge({ compatible }: { compatible: boolean }) {
+  return compatible ? (
+    <span className="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-500">
+      Compatível
+    </span>
+  ) : (
+    <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+      Não-natural
+    </span>
+  );
 }

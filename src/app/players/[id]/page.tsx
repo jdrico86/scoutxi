@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { X, Plus, Search, FileText, Pencil } from 'lucide-react';
 import { FavoriteStar } from '@/components/FavoriteStar';
 import { ShortlistMenu } from '@/components/ShortlistMenu';
+import { AddToSquadMenu } from '@/components/AddToSquadMenu';
 
 type Player = {
   id: string;
@@ -358,6 +359,7 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                     }}
                   />
                 )}
+                {!compareData && <AddToSquadMenu playerId={id} />}
                 {!compareData && (
                   <>
                     <button

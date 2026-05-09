@@ -11,6 +11,7 @@ import {
   UserCircle2,
   Users,
   Shield,
+  LayoutGrid,
   LogOut,
 } from 'lucide-react';
 import { FavoriteStar } from '@/components/FavoriteStar';
@@ -28,6 +29,7 @@ const NAV: NavItem[] = [
   { label: 'Perfis', href: '/profiles', icon: Target },
   { label: 'Equipas', href: '/teams', icon: Users },
   { label: 'Melhor 11', href: '/best-eleven', icon: Trophy },
+  { label: 'Minhas Equipas', href: '/squads', icon: LayoutGrid },
   { label: 'Shortlists', href: '/shortlists', icon: ClipboardList },
   { label: 'Importar', href: '/import', icon: Upload, adminOnly: true },
 ];

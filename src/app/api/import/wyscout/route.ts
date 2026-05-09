@@ -128,22 +128,34 @@ export async function POST(req: NextRequest) {
     poolId = newPool.id;
   }
 
-  // 2) Jogadores existentes desta pool, para decidir insert vs update
-  const { data: existing, error: existingErr } = await supabase
-    .from('players')
-    .select('id, name, current_team, age')
-    .eq('pool_id', poolId);
-  if (existingErr) {
-    return NextResponse.json({ error: `Erro a ler jogadores existentes: ${existingErr.message}` }, { status: 500 });
-  }
-
-  // Chave composta: name|team (lowercase). Mais robusto que só nome — homónimos.
+  // 2) Jogadores existentes desta pool, para decidir insert vs update.
+  //    Paginado para evitar o limite implícito de 1000 do PostgREST — em pools
+  //    grandes (CdP) o dedupe falhava silenciosamente e jogadores eram
+  //    re-inseridos como duplicados em vez de actualizados.
   const keyOf = (name: string, team: string | null | undefined, age: number | null | undefined) =>
     `${name.toLowerCase()}::${(team ?? '').toLowerCase()}::${age ?? ''}`;
 
   const existingByKey = new Map<string, string>(); // key -> player_id
-  for (const p of existing ?? []) {
-    existingByKey.set(keyOf(p.name, p.current_team, p.age), p.id);
+  const EXISTING_PAGE = 1000;
+  let existingFrom = 0;
+  while (true) {
+    const { data: page, error: existingErr } = await supabase
+      .from('players')
+      .select('id, name, current_team, age')
+      .eq('pool_id', poolId)
+      .range(existingFrom, existingFrom + EXISTING_PAGE - 1);
+    if (existingErr) {
+      return NextResponse.json(
+        { error: `Erro a ler jogadores existentes: ${existingErr.message}` },
+        { status: 500 }
+      );
+    }
+    if (!page || page.length === 0) break;
+    for (const p of page) {
+      existingByKey.set(keyOf(p.name, p.current_team, p.age), p.id);
+    }
+    if (page.length < EXISTING_PAGE) break;
+    existingFrom += EXISTING_PAGE;
   }
 
   // Separar em novos vs a actualizar

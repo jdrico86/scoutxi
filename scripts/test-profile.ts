@@ -84,15 +84,25 @@ async function main() {
   }
 
   // ── Buscar players + stats + directions ──────────────────────────────
-  // Players
-  const { data: playersData, error: playersErr } = await supabase
-    .from('players')
-    .select(
-      'id, name, current_team, position_primary, age, minutes_played, contract_until, market_value_eur, on_loan'
-    )
-    .eq('pool_id', poolId);
-  if (playersErr) throw playersErr;
-  const players = (playersData ?? []) as PlayerInput[];
+  // Players — paginado (mesmo padrão das stats abaixo) para evitar o limite
+  // implícito de 1000 do PostgREST em pools grandes.
+  const players: PlayerInput[] = [];
+  const PLAYERS_PAGE = 1000;
+  let playersFrom = 0;
+  while (true) {
+    const { data: page, error: playersErr } = await supabase
+      .from('players')
+      .select(
+        'id, name, current_team, position_primary, age, minutes_played, contract_until, market_value_eur, on_loan'
+      )
+      .eq('pool_id', poolId)
+      .range(playersFrom, playersFrom + PLAYERS_PAGE - 1);
+    if (playersErr) throw playersErr;
+    if (!page || page.length === 0) break;
+    players.push(...(page as PlayerInput[]));
+    if (page.length < PLAYERS_PAGE) break;
+    playersFrom += PLAYERS_PAGE;
+  }
 
   // Stats: inner join com pools via players, paginado
   const stats: StatInput[] = [];

@@ -26,19 +26,26 @@ export async function GET(_: NextRequest, { params }: Params) {
 
   const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
 
-  const { data, error } = await supabase
-    .from('players')
-    .select('current_team')
-    .eq('pool_id', id)
-    .not('current_team', 'is', null);
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  // Contar jogadores por clube
+  // Paginar para evitar o limite implícito de 1000 linhas do PostgREST —
+  // pools como CdP excedem 1000 jogadores e equipas inteiras ficavam fora.
   const counts = new Map<string, number>();
-  for (const row of data ?? []) {
-    if (!row.current_team) continue;
-    counts.set(row.current_team, (counts.get(row.current_team) ?? 0) + 1);
+  const PAGE = 1000;
+  let from = 0;
+  while (true) {
+    const { data: page, error } = await supabase
+      .from('players')
+      .select('current_team')
+      .eq('pool_id', id)
+      .not('current_team', 'is', null)
+      .range(from, from + PAGE - 1);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!page || page.length === 0) break;
+    for (const row of page) {
+      if (!row.current_team) continue;
+      counts.set(row.current_team, (counts.get(row.current_team) ?? 0) + 1);
+    }
+    if (page.length < PAGE) break;
+    from += PAGE;
   }
 
   // Ordenar contagens descendente, pegar nos top 20

@@ -15,12 +15,8 @@
  *  5. Ordenar descendente
  */
 
-import type {
-  MetricWeight,
-  ScoredPlayer,
-  ScoringResult,
-  ScoutingProfile,
-} from './profile-types';
+import type { ScoredPlayer, ScoringResult, ScoutingProfile } from './profile-types';
+import { computePercentile } from './percentile';
 
 /** Input mínimo de jogador para o scorer. */
 export type PlayerInput = {
@@ -41,29 +37,6 @@ export type StatInput = {
   metric_code: string;
   metric_value: number | null;
 };
-
-/**
- * Calcula percentil de um valor numa distribuição.
- *
- * Percentil "midrank": se o valor é igual a outros, atribui a média das posições.
- * Isto é mais justo que "a percentage below" — evita penalizar empates.
- *
- * Ex: valores [10, 20, 20, 30], valor=20 → percentil = 50 (está no meio dos empates)
- */
-function computePercentile(value: number, sortedValues: number[]): number {
-  if (sortedValues.length === 0) return 0;
-  if (sortedValues.length === 1) return 50; // com 1 só não faz sentido, devolve meio
-
-  // Contagem de valores estritamente abaixo + metade dos iguais
-  let below = 0;
-  let equal = 0;
-  for (const v of sortedValues) {
-    if (v < value) below++;
-    else if (v === value) equal++;
-  }
-  const percentile = ((below + equal / 2) / sortedValues.length) * 100;
-  return Math.round(percentile * 100) / 100; // 2 casas decimais
-}
 
 /** Aplica perfil aos dados e devolve ranking. */
 export function scoreProfile(args: {

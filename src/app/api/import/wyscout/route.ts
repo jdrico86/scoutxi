@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { parseWyscoutXlsx } from '@/lib/wyscout/parser';
 import type { Database } from '@/lib/supabase/database.types';
 import { getAuthUser } from '@/lib/supabase/server';
+import { recalculatePoolPercentiles } from '@/lib/similarity/recalculate';
 
 // Runtime Node (não Edge) — precisamos de Buffer e xlsx lê melhor em Node
 export const runtime = 'nodejs';
@@ -245,6 +246,18 @@ export async function POST(req: NextRequest) {
     statsInserted += batch.length;
   }
 
+  // 7) Recalcular player_percentiles para esta pool, FORA da "transação" do import:
+  //    erros aqui são reportados como warnings mas NÃO falham o import (que já está
+  //    consolidado na BD). Admin pode re-trigger manualmente via
+  //    POST /api/admin/recalculate-percentiles.
+  let percentilesResult: { ok: boolean; rows_inserted?: number; error?: string };
+  try {
+    const r = await recalculatePoolPercentiles(supabase, poolId);
+    percentilesResult = { ok: true, rows_inserted: r.rows_inserted };
+  } catch (err) {
+    percentilesResult = { ok: false, error: (err as Error).message };
+  }
+
   return NextResponse.json({
     ok: true,
     pool_id: poolId,
@@ -259,5 +272,6 @@ export async function POST(req: NextRequest) {
     columns_ignored: parsed.unmappedColumns,
     columns_missing: parsed.missingColumns,
     warnings: parsed.warnings,
+    percentiles: percentilesResult,
   });
 }

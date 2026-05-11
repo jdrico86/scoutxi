@@ -99,14 +99,21 @@ export async function loadPoolData(
     from += PAGE;
   }
 
-  // Directions das métricas
+  // Directions das métricas.
+  // BD usa 'higher_better' / 'lower_better' como valores canónicos; normalizamos
+  // aqui para a forma curta usada internamente ('higher' / 'lower'). Aceita
+  // ambas as formas para resiliência.
   const { data: metricsData, error: metricsErr } = await supabase
     .from('metrics')
     .select('code, direction');
   if (metricsErr) throw metricsErr;
   const directions: Record<string, 'higher' | 'lower'> = {};
   for (const m of (metricsData ?? []) as Array<{ code: string; direction: string | null }>) {
-    if (m.direction === 'higher' || m.direction === 'lower') directions[m.code] = m.direction;
+    if (m.direction === 'higher' || m.direction === 'higher_better') {
+      directions[m.code] = 'higher';
+    } else if (m.direction === 'lower' || m.direction === 'lower_better') {
+      directions[m.code] = 'lower';
+    }
   }
 
   return { players, stats, directions };

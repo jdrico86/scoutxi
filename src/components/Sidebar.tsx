@@ -115,14 +115,12 @@ export function Sidebar() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Debounce da pesquisa
+  // Debounce da pesquisa.
+  // q < 2 → não disparamos a busca; o JSX já esconde o dropdown via guard
+  // `query.length >= 2`. Limpar state aqui dava erro "set-state-in-effect".
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
-    if (query.trim().length < 2) {
-      setPlayerResults([]);
-      setTeamResults([]);
-      return;
-    }
+    if (query.trim().length < 2) return;
 
     timer.current = setTimeout(async () => {
       setLoading(true);

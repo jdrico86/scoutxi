@@ -1,14 +1,20 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, RotateCw } from 'lucide-react';
+import { Plus, RotateCw, Check, X } from 'lucide-react';
 import { MetricPickerModal, type Metric } from '@/components/MetricPickerModal';
 import {
   MetricFilterRow,
   type MetricFilterValue,
   type MetricThresholds,
 } from '@/components/MetricFilterRow';
+import {
+  ScoutResultsTable,
+  type DisplayPlayer,
+  type SortState,
+} from '@/components/ScoutResultsTable';
+import { SaveAsProfileModal } from '@/components/SaveAsProfileModal';
 import {
   runScoutQuery,
   type ScoutMetricFilter,
@@ -43,12 +49,17 @@ type PoolData = {
   generated_at: string;
 };
 
+type ShortlistSummary = { id: string; name: string };
+type SquadSummary = { id: string; name: string; formation: string };
+
 const POSITIONS_BY_LINE: Array<[string, string[]]> = [
   ['GR', ['GK']],
   ['Defesa', ['CB', 'LCB', 'RCB', 'LB', 'RB', 'LWB', 'RWB']],
   ['Médio', ['DMF', 'LDMF', 'RDMF', 'CMF', 'LCMF', 'RCMF', 'AMF', 'LAMF', 'RAMF', 'LM', 'RM']],
   ['Ataque', ['LW', 'RW', 'LWF', 'RWF', 'CF']],
 ];
+
+const STATIC_SORT_FIELDS = new Set(['name', 'team', 'pos', 'age', 'minutes']);
 
 export function PesquisaAvancada() {
   const router = useRouter();
@@ -63,13 +74,33 @@ export function PesquisaAvancada() {
   const [onLoan, setOnLoan] = useState<'any' | 'yes' | 'no'>('any');
   const [metricFilters, setMetricFilters] = useState<MetricFilterValue[]>([]);
 
-  // Cliente-cache: a pool data fica em React state durante a sessão.
   const [poolData, setPoolData] = useState<PoolData | null>(null);
   const [poolLoading, setPoolLoading] = useState(false);
   const [poolError, setPoolError] = useState<string | null>(null);
 
   const [showResults, setShowResults] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  // Selecção múltipla
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Sort: user override (null = usa default derivado dos filtros activos)
+  const [userSort, setUserSort] = useState<SortState | null>(null);
+
+  // Bulk actions
+  const [shortlistMenuOpen, setShortlistMenuOpen] = useState(false);
+  const [squadMenuOpen, setSquadMenuOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState<{
+    text: string;
+    link?: { href: string; label: string };
+  } | null>(null);
+
+  // Save-as-profile modal
+  const [saveProfileOpen, setSaveProfileOpen] = useState(false);
+
+  const shortlistMenuRef = useRef<HTMLDivElement>(null);
+  const squadMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch('/api/pools')
@@ -80,12 +111,12 @@ export function PesquisaAvancada() {
       .then((j) => setMetrics(j.metrics ?? []));
   }, []);
 
-  // Fetch pool data quando o user escolhe pool (ou clica recarregar).
-  const fetchPoolData = async (id: string, refresh = false) => {
+  const fetchPoolData = useCallback(async (id: string, refresh = false) => {
     setPoolLoading(true);
     setPoolError(null);
     setPoolData(null);
     setShowResults(false);
+    setSelectedIds(new Set());
     try {
       const res = await fetch(
         `/api/scout/pool-data?pool_id=${encodeURIComponent(id)}${refresh ? '&refresh=1' : ''}`
@@ -98,20 +129,48 @@ export function PesquisaAvancada() {
     } finally {
       setPoolLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    // Sem pool: useMemos abaixo retornam null pelo guard, UI esconde.
     if (!poolId) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPoolData(poolId);
-  }, [poolId]);
+  }, [poolId, fetchPoolData]);
+
+  // Fechar dropdowns ao clicar fora
+  useEffect(() => {
+    if (!shortlistMenuOpen && !squadMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        shortlistMenuOpen &&
+        shortlistMenuRef.current &&
+        !shortlistMenuRef.current.contains(e.target as Node)
+      ) {
+        setShortlistMenuOpen(false);
+      }
+      if (
+        squadMenuOpen &&
+        squadMenuRef.current &&
+        !squadMenuRef.current.contains(e.target as Node)
+      ) {
+        setSquadMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [shortlistMenuOpen, squadMenuOpen]);
+
+  // Feedback temporário (4s)
+  useEffect(() => {
+    if (!actionFeedback) return;
+    const t = setTimeout(() => setActionFeedback(null), 4000);
+    return () => clearTimeout(t);
+  }, [actionFeedback]);
 
   const togglePosition = (pos: string) => {
     setPositions((prev) => (prev.includes(pos) ? prev.filter((p) => p !== pos) : [...prev, pos]));
   };
 
-  // Constroi o input para runScoutQuery a partir do estado actual.
   const queryInput = useMemo(() => {
     const general_filters: Record<string, number | boolean> = {};
     if (minAge.trim()) general_filters.min_age = parseInt(minAge, 10);
@@ -120,10 +179,6 @@ export function PesquisaAvancada() {
     if (onLoan === 'yes') general_filters.on_loan = true;
     else if (onLoan === 'no') general_filters.on_loan = false;
 
-    // Traduzir mode=percentil → operator backend correspondente.
-    // gte+percentil → top_percentile (preciso, usa distribuição completa).
-    // lte+percentil → lte com value convertido via thresholds (interpolação).
-    // between+percentil → between com value_range convertido.
     const mf: ScoutMetricFilter[] = [];
     for (const f of metricFilters) {
       if (f.operator === 'gte' && f.mode === 'percentile' && f.value != null) {
@@ -171,13 +226,9 @@ export function PesquisaAvancada() {
       general_filters: Object.keys(general_filters).length > 0 ? general_filters : undefined,
       metric_filters: mf,
     };
-    // lastThresholds intencionalmente fora dos deps — evita ciclo (preview depende
-    // de queryInput, queryInput depende de thresholds = preview.metric_thresholds).
-    // Os thresholds usados para conversão são one-step-behind, aceitável.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [positions, minAge, maxAge, minMinutes, onLoan, metricFilters]);
 
-  // Preview ao vivo (síncrono — runScoutQuery é puro).
   const preview: ScoutResult | null = useMemo(() => {
     if (!poolId || !poolData) return null;
     return runScoutQuery({
@@ -188,11 +239,8 @@ export function PesquisaAvancada() {
     });
   }, [poolId, poolData, queryInput]);
 
-  // Thresholds da última run (para conversão valor↔percentil nos filtros lte/between+percentil).
   const lastThresholds: Record<string, MetricThresholds> = preview?.metric_thresholds ?? {};
 
-  // Resultado completo (com players[]) — só após o user clicar Procurar.
-  // Depois disso, actualiza ao vivo conforme filtros mudam (é instantâneo).
   const fullResult: ScoutResult | null = useMemo(() => {
     if (!poolId || !showResults || !poolData) return null;
     return runScoutQuery({
@@ -203,12 +251,125 @@ export function PesquisaAvancada() {
     });
   }, [poolId, showResults, poolData, queryInput]);
 
-  // Mapa para enriquecer resultados com team_in_period (a partir do poolData).
   const playerInPool = useMemo(() => {
     const m = new Map<string, PoolDataPlayer>();
     if (poolData) for (const p of poolData.players) m.set(p.id, p);
     return m;
   }, [poolData]);
+
+  const activeMetricCodes = useMemo(() => metricFilters.map((f) => f.metric_code), [metricFilters]);
+
+  // Default sort: 1ª métrica DESC se houver, senão nome ASC.
+  // Se o user fez override e o campo ainda é válido, usa o override.
+  const effectiveSort: SortState = useMemo(() => {
+    if (
+      userSort &&
+      (STATIC_SORT_FIELDS.has(userSort.field) || activeMetricCodes.includes(userSort.field))
+    ) {
+      return userSort;
+    }
+    if (activeMetricCodes.length > 0) {
+      return { field: activeMetricCodes[0], direction: 'desc' };
+    }
+    return { field: 'name', direction: 'asc' };
+  }, [userSort, activeMetricCodes]);
+
+  const onSort = (field: string) => {
+    setUserSort((curr) => {
+      if (curr && curr.field === field) {
+        return { field, direction: curr.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      // Strings começam asc; números/métricas começam desc
+      const direction = STATIC_SORT_FIELDS.has(field) && field !== 'age' && field !== 'minutes' ? 'asc' : 'desc';
+      return { field, direction };
+    });
+  };
+
+  // Build displayPlayers (com team_in_period enriquecido)
+  const displayPlayers: DisplayPlayer[] = useMemo(() => {
+    if (!fullResult?.players) return [];
+    return fullResult.players.map((p) => {
+      const pd = playerInPool.get(p.id);
+      return {
+        id: p.id,
+        name: p.name,
+        current_team: p.current_team,
+        team_in_period: pd?.team_in_period ?? null,
+        position_primary: p.position_primary,
+        age: p.age,
+        minutes_played: p.minutes_played,
+        metric_values: p.metric_values,
+      };
+    });
+  }, [fullResult, playerInPool]);
+
+  // Multi-select handlers
+  const toggleSelect = (playerId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(playerId)) next.delete(playerId);
+      else next.add(playerId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => {
+      const allIds = displayPlayers.map((p) => p.id);
+      const allSelected = allIds.length > 0 && allIds.every((id) => prev.has(id));
+      if (allSelected) return new Set();
+      return new Set(allIds);
+    });
+  };
+
+  // Bulk actions
+  const addToShortlist = async (shortlistId: string, shortlistName: string) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const results = await Promise.all(
+        ids.map((pid) =>
+          fetch(`/api/shortlists/${shortlistId}/players`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player_id: pid }),
+          }).then((r) => r.ok)
+        )
+      );
+      const ok = results.filter(Boolean).length;
+      setActionFeedback({ text: `✓ ${ok}/${ids.length} adicionados a "${shortlistName}"` });
+      setShortlistMenuOpen(false);
+    } catch (err) {
+      setActionFeedback({ text: `Erro: ${(err as Error).message}` });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const addToSquad = async (squadId: string, squadName: string) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const results = await Promise.all(
+        ids.map((pid) =>
+          fetch(`/api/squads/${squadId}/players`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player_id: pid }),
+          }).then((r) => r.ok || r.status === 409)
+        )
+      );
+      const ok = results.filter(Boolean).length;
+      setActionFeedback({ text: `✓ ${ok}/${ids.length} adicionados a "${squadName}"` });
+      setSquadMenuOpen(false);
+    } catch (err) {
+      setActionFeedback({ text: `Erro: ${(err as Error).message}` });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const addMetricFilter = (m: Metric) => {
     setMetricFilters((prev) => [
@@ -232,8 +393,16 @@ export function PesquisaAvancada() {
     return m;
   }, [metrics]);
 
-  const activeMetricCodes = metricFilters.map((f) => f.metric_code);
   const filtersDisabled = poolLoading || !poolData;
+  const generalFiltersForSave = useMemo(() => {
+    const o: { min_age?: number; max_age?: number; min_minutes?: number; on_loan?: boolean } = {};
+    if (minAge.trim()) o.min_age = parseInt(minAge, 10);
+    if (maxAge.trim()) o.max_age = parseInt(maxAge, 10);
+    if (minMinutes.trim()) o.min_minutes = parseInt(minMinutes, 10);
+    if (onLoan === 'yes') o.on_loan = true;
+    else if (onLoan === 'no') o.on_loan = false;
+    return o;
+  }, [minAge, maxAge, minMinutes, onLoan]);
 
   return (
     <>
@@ -244,7 +413,6 @@ export function PesquisaAvancada() {
 
       <section className="rounded-lg border border-neutral-200 bg-white p-6">
         <div className="space-y-5">
-          {/* Pool selector + recarregar */}
           <div>
             <label className="block text-xs font-medium text-neutral-700">Pool</label>
             <div className="mt-1 flex items-center gap-2">
@@ -281,7 +449,6 @@ export function PesquisaAvancada() {
             )}
           </div>
 
-          {/* Loading skeleton */}
           {poolLoading && (
             <div className="rounded-md border border-neutral-200 bg-neutral-50 p-4">
               <div className="flex items-center gap-3">
@@ -306,7 +473,6 @@ export function PesquisaAvancada() {
             </div>
           )}
 
-          {/* Resto dos filtros (disabled se pool não carregada) */}
           <fieldset disabled={filtersDisabled} className="space-y-5 disabled:opacity-50">
             <div>
               <label className="block text-xs font-medium text-neutral-700">
@@ -418,7 +584,6 @@ export function PesquisaAvancada() {
             </div>
           </fieldset>
 
-          {/* Preview ao vivo + acção */}
           <div className="flex flex-wrap items-center gap-3 border-t border-neutral-100 pt-4">
             <button
               type="button"
@@ -448,25 +613,116 @@ export function PesquisaAvancada() {
 
       {showResults && fullResult && (
         <section className="mt-6 overflow-hidden rounded-lg border border-neutral-200 bg-white">
-          <div className="border-b border-neutral-200 bg-neutral-50 px-6 py-3 text-sm">
-            <strong className="text-neutral-900">{fullResult.count}</strong>
-            <span className="text-neutral-700">
-              {' '}
-              jogadores correspondem · peer group {fullResult.peer_group_size}
-            </span>
-          </div>
-          {!fullResult.players || fullResult.players.length === 0 ? (
+          {/* Bulk action bar (sticky no topo da secção) */}
+          {selectedIds.size > 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 bg-emerald-50 px-6 py-2.5">
+              <div className="text-sm font-medium text-emerald-900">
+                {selectedIds.size} jogador{selectedIds.size === 1 ? '' : 'es'} seleccionado
+                {selectedIds.size === 1 ? '' : 's'}
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative" ref={shortlistMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShortlistMenuOpen((v) => !v);
+                      setSquadMenuOpen(false);
+                    }}
+                    disabled={bulkBusy}
+                    className="rounded-md border border-neutral-300 bg-white px-3 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+                  >
+                    + Shortlist
+                  </button>
+                  {shortlistMenuOpen && (
+                    <BulkAddPopover
+                      target="shortlist"
+                      onPick={(id, name) => addToShortlist(id, name)}
+                      onClose={() => setShortlistMenuOpen(false)}
+                    />
+                  )}
+                </div>
+                <div className="relative" ref={squadMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSquadMenuOpen((v) => !v);
+                      setShortlistMenuOpen(false);
+                    }}
+                    disabled={bulkBusy}
+                    className="rounded-md border border-neutral-300 bg-white px-3 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+                  >
+                    + Equipa-sombra
+                  </button>
+                  {squadMenuOpen && (
+                    <BulkAddPopover
+                      target="squad"
+                      onPick={(id, name) => addToSquad(id, name)}
+                      onClose={() => setSquadMenuOpen(false)}
+                    />
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds(new Set())}
+                  className="text-xs text-emerald-800 hover:underline"
+                >
+                  Limpar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="border-b border-neutral-200 bg-neutral-50 px-6 py-3 text-sm">
+              <strong className="text-neutral-900">{fullResult.count}</strong>
+              <span className="text-neutral-700">
+                {' '}
+                jogadores correspondem · peer group {fullResult.peer_group_size}
+              </span>
+            </div>
+          )}
+
+          {actionFeedback && (
+            <div className="flex items-center gap-2 border-b border-neutral-200 bg-emerald-50/60 px-6 py-2 text-xs text-emerald-800">
+              <Check className="h-3.5 w-3.5" strokeWidth={2.2} />
+              <span>{actionFeedback.text}</span>
+              {actionFeedback.link && (
+                <button
+                  type="button"
+                  onClick={() => router.push(actionFeedback.link!.href)}
+                  className="underline hover:text-emerald-900"
+                >
+                  {actionFeedback.link.label}
+                </button>
+              )}
+            </div>
+          )}
+
+          {displayPlayers.length === 0 ? (
             <div className="p-6 text-sm text-neutral-500">Nenhum jogador corresponde.</div>
           ) : (
-            <ResultsTable
-              players={fullResult.players}
-              playerInPool={playerInPool}
-              poolName={poolData?.pool_name ?? ''}
+            <ScoutResultsTable
+              players={displayPlayers}
               activeMetricCodes={activeMetricCodes}
               metricByCode={metricByCode}
+              poolName={poolData?.pool_name ?? ''}
+              selectedIds={selectedIds}
+              sort={effectiveSort}
+              onSort={onSort}
+              onToggleSelect={toggleSelect}
+              onToggleSelectAll={toggleSelectAll}
               onOpenPlayer={(id) => router.push(`/players/${id}`)}
             />
           )}
+
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-neutral-200 bg-neutral-50 px-6 py-3">
+            <button
+              type="button"
+              onClick={() => setSaveProfileOpen(true)}
+              disabled={!poolData}
+              className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+            >
+              Guardar como perfil
+            </button>
+          </div>
         </section>
       )}
 
@@ -479,114 +735,170 @@ export function PesquisaAvancada() {
           onClose={() => setPickerOpen(false)}
         />
       )}
+
+      {saveProfileOpen && (
+        <SaveAsProfileModal
+          positions={positions}
+          generalFilters={generalFiltersForSave}
+          hasMetricFilters={metricFilters.length > 0}
+          onClose={() => setSaveProfileOpen(false)}
+          onSaved={(profileId) => {
+            setSaveProfileOpen(false);
+            // Fica na tab Pesquisa avançada — toast com link para a tab Perfis.
+            setActionFeedback({
+              text: '✓ Perfil criado.',
+              link: profileId
+                ? { href: `/profiles?profile=${profileId}`, label: 'Ver na aba Perfis' }
+                : undefined,
+            });
+          }}
+        />
+      )}
     </>
   );
 }
 
-function ResultsTable({
-  players,
-  playerInPool,
-  poolName,
-  activeMetricCodes,
-  metricByCode,
-  onOpenPlayer,
+// ── Popover de bulk-add (shortlist ou squad) ────────────────────────────
+function BulkAddPopover({
+  target,
+  onPick,
+  onClose,
 }: {
-  players: NonNullable<ScoutResult['players']>;
-  playerInPool: Map<string, PoolDataPlayer>;
-  poolName: string;
-  activeMetricCodes: string[];
-  metricByCode: Map<string, Metric>;
-  onOpenPlayer: (id: string) => void;
+  target: 'shortlist' | 'squad';
+  onPick: (id: string, name: string) => void;
+  onClose: () => void;
 }) {
+  const [items, setItems] = useState<Array<ShortlistSummary | SquadSummary> | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const url = target === 'shortlist' ? '/api/shortlists' : '/api/squads';
+    fetch(url)
+      .then((r) => r.json())
+      .then((j) => {
+        const list = target === 'shortlist' ? j.shortlists : j.squads;
+        setItems(list ?? []);
+      })
+      .catch(() => setItems([]));
+  }, [target]);
+
+  const createAndPick = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const url = target === 'shortlist' ? '/api/shortlists' : '/api/squads';
+      const body =
+        target === 'shortlist' ? { name } : { name, formation: '4-3-3' };
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Erro a criar.');
+      const created =
+        target === 'shortlist' ? json.shortlist : json.squad;
+      if (created?.id) onPick(created.id, created.name);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
-          <tr>
-            <th className="px-4 py-2">Jogador</th>
-            <th className="px-4 py-2">Equipa</th>
-            <th className="px-4 py-2">Pos</th>
-            <th className="px-4 py-2 text-right">Idade</th>
-            <th className="px-4 py-2 text-right">Min</th>
-            {activeMetricCodes.map((code) => {
-              const m = metricByCode.get(code);
-              return (
-                <th key={code} className="px-4 py-2 text-right">
-                  {m?.label_pt ?? code}
-                </th>
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {players.map((p) => {
-            const pd = playerInPool.get(p.id);
-            const team = pd?.team_in_period ?? p.current_team;
-            const transferred =
-              pd?.team_in_period && p.current_team && pd.team_in_period !== p.current_team
-                ? p.current_team
-                : null;
-            const valuesByCode = new Map(p.metric_values.map((v) => [v.metric_code, v]));
-            return (
-              <tr key={p.id} className="border-t border-neutral-100 hover:bg-neutral-50">
-                <td className="px-4 py-3">
-                  <button
-                    type="button"
-                    onClick={() => onOpenPlayer(p.id)}
-                    className="font-medium text-neutral-900 hover:text-emerald-700 hover:underline"
-                  >
-                    {p.name}
-                  </button>
-                  <div className="text-xs text-neutral-400">{poolName}</div>
-                </td>
-                <td className="px-4 py-3 text-neutral-700">
-                  {team ?? '—'}
-                  {transferred && (
-                    <div className="text-xs text-neutral-400">→ {transferred}</div>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-neutral-600">{p.position_primary ?? '—'}</td>
-                <td className="px-4 py-3 text-right text-neutral-600">{p.age ?? '—'}</td>
-                <td className="px-4 py-3 text-right text-neutral-600">
-                  {p.minutes_played?.toLocaleString() ?? '—'}
-                </td>
-                {activeMetricCodes.map((code) => {
-                  const v = valuesByCode.get(code);
-                  return (
-                    <td key={code} className="px-4 py-3 text-right">
-                      {v?.raw_value == null ? (
-                        <span className="text-neutral-400">—</span>
-                      ) : (
-                        <>
-                          <span className="font-medium text-neutral-900">
-                            {formatVal(v.raw_value)}
-                          </span>
-                          {v.percentile != null && (
-                            <span className="ml-1 text-xs text-neutral-400">
-                              (P{v.percentile.toFixed(0)})
-                            </span>
-                          )}
-                        </>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="absolute right-0 top-full z-30 mt-1 w-72 overflow-hidden rounded-md border border-neutral-200 bg-white shadow-lg">
+      <div className="flex items-center justify-between border-b border-neutral-100 px-3 py-2">
+        <span className="text-xs font-medium uppercase tracking-wider text-neutral-500">
+          {target === 'shortlist' ? 'Shortlists' : 'Equipas-sombra'}
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded p-0.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
+          aria-label="Fechar"
+        >
+          <X className="h-3 w-3" strokeWidth={2} />
+        </button>
+      </div>
+
+      {items === null ? (
+        <div className="px-3 py-3 text-xs text-neutral-500">A carregar…</div>
+      ) : items.length === 0 && !creating ? (
+        <div className="px-3 py-3 text-xs text-neutral-500">
+          {target === 'shortlist' ? 'Sem shortlists ainda.' : 'Sem equipas ainda.'}
+        </div>
+      ) : (
+        <ul className="max-h-56 overflow-y-auto">
+          {items.map((it) => (
+            <li key={it.id}>
+              <button
+                type="button"
+                onClick={() => onPick(it.id, it.name)}
+                disabled={busy}
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-neutral-50 disabled:opacity-50"
+              >
+                {it.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="border-t border-neutral-100 p-2">
+        {creating ? (
+          <div className="space-y-2 px-1 py-1">
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder={target === 'shortlist' ? 'Nome da shortlist' : 'Nome da equipa'}
+              autoFocus
+              className="w-full rounded-md border border-neutral-200 px-2 py-1 text-sm focus:border-neutral-400 focus:outline-none"
+            />
+            {error && <div className="text-xs text-red-700">{error}</div>}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={createAndPick}
+                disabled={busy || newName.trim().length === 0}
+                className="rounded-md bg-neutral-900 px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+              >
+                {busy ? 'A criar…' : 'Criar + adicionar'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreating(false);
+                  setNewName('');
+                }}
+                disabled={busy}
+                className="text-xs text-neutral-500 hover:text-neutral-800"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="flex w-full items-center gap-1.5 px-2 py-1 text-xs text-neutral-600 hover:text-neutral-900"
+          >
+            <Plus className="h-3 w-3" strokeWidth={2} />
+            {target === 'shortlist' ? 'Criar nova shortlist' : 'Criar nova equipa'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
 
-function formatVal(n: number): string {
-  if (Math.abs(n) >= 100) return n.toFixed(0);
-  if (Math.abs(n) >= 10) return n.toFixed(1);
-  return n.toFixed(2);
-}
-
-/** Interpolação para converter percentil → valor absoluto via thresholds. */
 function percentileToAbsolute(percentile: number, t: MetricThresholds): number {
   const points: Array<[number, number]> = [
     [0, t.min],

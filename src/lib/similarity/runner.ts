@@ -18,6 +18,7 @@ import {
   type SimilarityQuery,
 } from './similarity';
 import { getMetricsForPosition, POSITION_METRICS } from './position-metrics';
+import { formatPoolName } from '@/lib/pools';
 
 export type SimilarityPlayer = {
   id: string;
@@ -253,7 +254,7 @@ export async function runSimilarityQuery(
       .select('id, name, season')
       .in('id', Array.from(usedPoolIds));
     for (const p of (pools ?? []) as Array<{ id: string; name: string; season: string }>) {
-      poolNameById.set(p.id, `${p.name} ${p.season}`);
+      poolNameById.set(p.id, formatPoolName(p.name, p.season));
     }
   }
 

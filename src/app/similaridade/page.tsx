@@ -11,6 +11,7 @@ import {
 } from '@/components/SimilarityResultsTable';
 import type { Metric } from '@/components/MetricPickerModal';
 import { POSITION_METRICS } from '@/lib/similarity/position-metrics';
+import { formatPoolName } from '@/lib/pools';
 
 type Pool = { id: string; name: string; season: string };
 
@@ -323,7 +324,7 @@ export default function SimilaridadePage() {
                           : 'border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50'
                       }`}
                     >
-                      {p.name} {p.season}
+                      {formatPoolName(p.name, p.season)}
                     </button>
                   );
                 })}

@@ -6,6 +6,7 @@ import { X, Plus, Search, FileText, Pencil } from 'lucide-react';
 import { FavoriteStar } from '@/components/FavoriteStar';
 import { ShortlistMenu } from '@/components/ShortlistMenu';
 import { AddToSquadMenu } from '@/components/AddToSquadMenu';
+import { formatPoolName } from '@/lib/pools';
 
 type Player = {
   id: string;
@@ -332,7 +333,7 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                     </p>
                   )}
                 <p className="mt-1 text-xs text-neutral-500">
-                  {pool ? `${pool.name} ${pool.season}` : 'Pool desconhecida'}
+                  {pool ? formatPoolName(pool.name, pool.season) : 'Pool desconhecida'}
                 </p>
               </div>
 

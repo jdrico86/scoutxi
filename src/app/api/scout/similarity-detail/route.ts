@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getAuthUser } from '@/lib/supabase/server';
 import { getMetricsForPosition, POSITION_METRICS, SUPPORTED_POSITIONS } from '@/lib/similarity/position-metrics';
+import { formatPoolName } from '@/lib/pools';
 
 export const runtime = 'nodejs';
 export const maxDuration = 15;
@@ -121,7 +122,7 @@ export async function GET(req: NextRequest) {
     .in('id', poolIds);
   const poolNameById = new Map<string, string>();
   for (const p of (poolsData ?? []) as Array<{ id: string; name: string; season: string }>) {
-    poolNameById.set(p.id, `${p.name} ${p.season}`);
+    poolNameById.set(p.id, formatPoolName(p.name, p.season));
   }
 
   // ── Percentis dos dois ───────────────────────────────────────────────

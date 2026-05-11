@@ -4,6 +4,7 @@ import { Suspense, use, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Download, ArrowLeft } from 'lucide-react';
 import { toPng } from 'html-to-image';
+import { formatPoolName } from '@/lib/pools';
 
 type Player = {
   id: string;
@@ -253,7 +254,7 @@ const handleExport = useCallback(async () => {
                   .join(' · ')}
               </p>
               <p className="mt-0.5 text-sm text-neutral-500">
-                {pool ? `${pool.name} ${pool.season}` : ''}
+                {pool ? formatPoolName(pool.name, pool.season) : ''}
               </p>
             </div>
             {selectedProfile && breakdown && (

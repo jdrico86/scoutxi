@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getAuthUser } from '@/lib/supabase/server';
 import { recalculatePoolPercentiles } from '@/lib/similarity/recalculate';
+import { formatPoolName } from '@/lib/pools';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest) {
   for (const p of (pools ?? []) as Array<{ id: string; name: string; season: string }>) {
     try {
       const r = await recalculatePoolPercentiles(supabase, p.id);
-      results.push({ ...r, name: `${p.name} ${p.season}` });
+      results.push({ ...r, name: formatPoolName(p.name, p.season) });
     } catch (err) {
       errors.push({ pool_id: p.id, error: (err as Error).message });
     }

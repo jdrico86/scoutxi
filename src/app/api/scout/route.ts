@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { getAuthUser } from '@/lib/supabase/server';
 import { loadPoolData } from '@/lib/scouting/db-helpers';
 import { runScoutQuery, type ScoutQueryInput } from '@/lib/scout/query-builder';
+import { formatPoolName } from '@/lib/pools';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -119,7 +120,7 @@ export async function POST(req: NextRequest) {
     .select('name, season')
     .eq('id', body.pool_id)
     .maybeSingle();
-  const poolName = poolData ? `${poolData.name} ${poolData.season}` : '';
+  const poolName = poolData ? formatPoolName(poolData.name, poolData.season) : '';
 
   const enriched = (result.players ?? []).map((p) => ({
     ...p,

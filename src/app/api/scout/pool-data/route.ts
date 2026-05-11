@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getAuthUser } from '@/lib/supabase/server';
 import { getCached, setCached, invalidateCached } from '@/lib/scouting/pool-cache';
+import { formatPoolName } from '@/lib/pools';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -79,7 +80,7 @@ export async function GET(req: NextRequest) {
     .maybeSingle();
   if (poolErr) return NextResponse.json({ error: poolErr.message }, { status: 500 });
   if (!poolRow) return NextResponse.json({ error: 'Pool não encontrada.' }, { status: 404 });
-  const pool_name = `${poolRow.name} ${poolRow.season}`;
+  const pool_name = formatPoolName(poolRow.name, poolRow.season);
 
   // ── Players paginados (com team_in_period) ────────────────────────────
   const players: PoolDataPlayer[] = [];

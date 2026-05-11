@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, RotateCw, Check, X } from 'lucide-react';
+import { formatPoolName } from '@/lib/pools';
 import { MetricPickerModal, type Metric } from '@/components/MetricPickerModal';
 import {
   MetricFilterRow,
@@ -424,7 +425,7 @@ export function PesquisaAvancada() {
                 <option value="">— escolhe pool —</option>
                 {pools.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} {p.season}
+                    {formatPoolName(p.name, p.season)}
                   </option>
                 ))}
               </select>

@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FORMATIONS, type FormationDef, type SlotDef } from '@/lib/best-eleven/formations';
+import { formatPoolName } from '@/lib/pools';
 
 type Pool = { id: string; name: string; season: string; competition: string | null };
 
@@ -207,7 +208,7 @@ function BestElevenContent() {
                 <option value="">— escolher pool —</option>
                 {pools.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} {p.season}
+                    {formatPoolName(p.name, p.season)}
                   </option>
                 ))}
               </select>

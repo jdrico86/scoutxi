@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
+import { formatPoolName } from '@/lib/pools';
 
 export type AnchorSelection = {
   pool_id: string;
@@ -126,7 +127,7 @@ export function AnchorPicker({ pools, selectedPoolId, onPoolChange, anchor, onAn
           <option value="">— escolhe pool —</option>
           {pools.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name} {p.season}
+              {formatPoolName(p.name, p.season)}
             </option>
           ))}
         </select>

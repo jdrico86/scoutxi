@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getFormation } from '@/lib/best-eleven/formations';
 import { getAuthUser } from '@/lib/supabase/server';
+import { formatPoolName } from '@/lib/pools';
 
 export const runtime = 'nodejs';
 
@@ -78,7 +79,7 @@ export async function GET(_: NextRequest, { params }: Params) {
       .select('id, name, season')
       .in('id', poolIds);
     for (const pool of pools ?? []) {
-      poolNameById.set(pool.id, `${pool.name} ${pool.season}`);
+      poolNameById.set(pool.id, formatPoolName(pool.name, pool.season));
     }
   }
 

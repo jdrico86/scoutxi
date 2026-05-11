@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FavoriteStar } from '@/components/FavoriteStar';
+import { formatPoolName } from '@/lib/pools';
 
 type ProfileListItem = {
   id: string;
@@ -293,7 +294,7 @@ export function PerfisGuardados() {
               <option value="">— escolhe um pool —</option>
               {pools.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} ({p.season})
+                  {formatPoolName(p.name, p.season)}
                 </option>
               ))}
             </select>

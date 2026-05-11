@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Check, Plus, X } from 'lucide-react';
 import { AnchorPicker, type AnchorSelection } from '@/components/AnchorPicker';
 import { LensSelector, type Lens } from '@/components/LensSelector';
@@ -27,22 +27,204 @@ const POSITIONS_BY_LINE: Array<[string, string[]]> = [
 type ShortlistSummary = { id: string; name: string };
 type SquadSummary = { id: string; name: string; formation: string };
 
-export default function SimilaridadePage() {
+// ── State preservation: URL params + sessionStorage ───────────────────────
+//
+// URL preserva inputs do form (anchor, pools, positions, age, minutes,
+// lens=full|profile, profile_id). lens=custom NÃO entra no URL — fica em
+// React state apenas (weights complexos; trade-off documentado).
+//
+// sessionStorage cacheia resultados com queryKey canónico que captura o
+// snapshot completo do form (incluindo weights de lens=custom). Ao voltar
+// do drill-down: lê URL → hidrata form → compara queryKey → se bate,
+// restaura resultados sem fetch; se não bate, form preenchido sem results.
+const CACHE_KEY = 'scout-similarity-cache';
+const DEFAULT_MIN_MINUTES = 600;
+
+type InitialFormFromUrl = {
+  anchorPoolId: string;
+  anchorPlayerId: string | null;
+  targetPoolIds: string[];
+  positions: string[];
+  minMinutes: number;
+  ageMin: string;
+  ageMax: string;
+  lens: Lens;
+};
+
+function readInitialFromUrl(searchParams: URLSearchParams): InitialFormFromUrl {
+  const anchorPoolId = searchParams.get('anchor_pool') ?? '';
+  // Edge case 3: anchor_player sem anchor_pool é inválido → ignora player.
+  const rawAnchorPlayer = searchParams.get('anchor_player');
+  const anchorPlayerId = rawAnchorPlayer && anchorPoolId ? rawAnchorPlayer : null;
+
+  const targetPoolIds = (searchParams.get('pools') ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const positions = (searchParams.get('positions') ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const mmRaw = parseInt(searchParams.get('min_minutes') ?? '', 10);
+  const minMinutes = Number.isFinite(mmRaw) && mmRaw >= 0 ? mmRaw : DEFAULT_MIN_MINUTES;
+
+  const ageMin = searchParams.get('age_min') ?? '';
+  const ageMax = searchParams.get('age_max') ?? '';
+
+  // Edge case 5: lens=profile sem profile_id → ignora lens. lens=custom não
+  // é aceite via URL (só em-memória durante a sessão).
+  const lensParam = searchParams.get('lens');
+  const profileId = searchParams.get('profile_id');
+  let lens: Lens = { mode: 'full' };
+  if (lensParam === 'profile' && profileId) {
+    lens = { mode: 'profile', profile_id: profileId };
+  }
+
+  return {
+    anchorPoolId,
+    anchorPlayerId,
+    targetPoolIds,
+    positions,
+    minMinutes,
+    ageMin,
+    ageMax,
+    lens,
+  };
+}
+
+function buildSearchParams(snapshot: {
+  anchorPoolId: string;
+  anchorPlayerId: string | null;
+  targetPoolIds: string[];
+  positions: string[];
+  minMinutes: number;
+  ageMin: string;
+  ageMax: string;
+  lens: Lens;
+}): URLSearchParams {
+  const params = new URLSearchParams();
+  if (snapshot.anchorPoolId) params.set('anchor_pool', snapshot.anchorPoolId);
+  // anchor_player só faz sentido com anchor_pool.
+  if (snapshot.anchorPlayerId && snapshot.anchorPoolId) {
+    params.set('anchor_player', snapshot.anchorPlayerId);
+  }
+  if (snapshot.targetPoolIds.length > 0) params.set('pools', snapshot.targetPoolIds.join(','));
+  if (snapshot.positions.length > 0) params.set('positions', snapshot.positions.join(','));
+  if (snapshot.minMinutes !== DEFAULT_MIN_MINUTES) {
+    params.set('min_minutes', String(snapshot.minMinutes));
+  }
+  if (snapshot.ageMin.trim()) params.set('age_min', snapshot.ageMin.trim());
+  if (snapshot.ageMax.trim()) params.set('age_max', snapshot.ageMax.trim());
+  // lens=full é default — omite. lens=custom é session-only — não escreve.
+  if (snapshot.lens.mode === 'profile' && snapshot.lens.profile_id) {
+    params.set('lens', 'profile');
+    params.set('profile_id', snapshot.lens.profile_id);
+  }
+  return params;
+}
+
+/**
+ * Devolve string canónica que identifica unicamente a query. Inclui o
+ * snapshot completo do form (incl. lens=custom weights). Usada como key
+ * no sessionStorage para validar se os resultados em cache batem com o
+ * form actual.
+ */
+function canonicalQueryKey(snapshot: {
+  anchorPoolId: string;
+  anchorPlayerId: string | null;
+  targetPoolIds: string[];
+  positions: string[];
+  minMinutes: number;
+  ageMin: string;
+  ageMax: string;
+  lens: Lens;
+}): string {
+  let lensCanon: unknown;
+  if (snapshot.lens.mode === 'custom') {
+    const sortedWeights: Record<string, number> = {};
+    for (const k of Object.keys(snapshot.lens.weights).sort()) {
+      sortedWeights[k] = snapshot.lens.weights[k];
+    }
+    lensCanon = { mode: 'custom', weights: sortedWeights };
+  } else if (snapshot.lens.mode === 'profile') {
+    lensCanon = { mode: 'profile', profile_id: snapshot.lens.profile_id };
+  } else {
+    lensCanon = { mode: 'full' };
+  }
+  return JSON.stringify({
+    a_pool: snapshot.anchorPoolId || null,
+    a_player: snapshot.anchorPlayerId || null,
+    pools: [...snapshot.targetPoolIds].sort(),
+    positions: [...snapshot.positions].sort(),
+    mm: snapshot.minMinutes,
+    a_min: snapshot.ageMin.trim() || null,
+    a_max: snapshot.ageMax.trim() || null,
+    lens: lensCanon,
+  });
+}
+
+type CacheEntry = {
+  queryKey: string;
+  candidates: SimilarityResultItem[];
+  warnings: string[];
+  cached_at: string;
+};
+
+function saveToCache(entry: CacheEntry): void {
+  // Edge case 1: setItem pode rebentar (quota / private mode). Degrada
+  // silenciosamente — perdemos só o cache para a próxima navegação.
+  try {
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify(entry));
+  } catch {
+    // no-op
+  }
+}
+
+function loadFromCache(): CacheEntry | null {
+  // Edge case 2: JSON malformado / shape inesperado → trata como cache absent.
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      !parsed ||
+      typeof parsed.queryKey !== 'string' ||
+      !Array.isArray(parsed.candidates) ||
+      !Array.isArray(parsed.warnings)
+    ) {
+      return null;
+    }
+    return parsed as CacheEntry;
+  } catch {
+    return null;
+  }
+}
+
+function SimilaridadeContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Lazy initialiser: lê URL params 1x (na primeira render). useMemo com
+  // deps vazias garante que mudanças posteriores do URL (provocadas pelo
+  // próprio efeito de sincronização) não re-inicializam o form.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const initialFromUrl = useMemo(() => readInitialFromUrl(searchParams), []);
 
   const [pools, setPools] = useState<Pool[]>([]);
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
 
-  // Estado de input
-  const [anchorPoolId, setAnchorPoolId] = useState('');
+  // Estado de input — inicializado a partir do URL.
+  // anchor é hidratado async (precisa de fetch /api/players/[id]) noutro effect.
+  const [anchorPoolId, setAnchorPoolId] = useState(initialFromUrl.anchorPoolId);
   const [anchor, setAnchor] = useState<AnchorSelection | null>(null);
-  const [targetPoolIds, setTargetPoolIds] = useState<string[]>([]);
-  const [positions, setPositions] = useState<string[]>([]);
-  const [minMinutes, setMinMinutes] = useState(600);
-  const [ageMin, setAgeMin] = useState('');
-  const [ageMax, setAgeMax] = useState('');
-  const [lens, setLens] = useState<Lens>({ mode: 'full' });
+  const [targetPoolIds, setTargetPoolIds] = useState<string[]>(initialFromUrl.targetPoolIds);
+  const [positions, setPositions] = useState<string[]>(initialFromUrl.positions);
+  const [minMinutes, setMinMinutes] = useState(initialFromUrl.minMinutes);
+  const [ageMin, setAgeMin] = useState(initialFromUrl.ageMin);
+  const [ageMax, setAgeMax] = useState(initialFromUrl.ageMax);
+  const [lens, setLens] = useState<Lens>(initialFromUrl.lens);
 
   // Estado de output
   const [loading, setLoading] = useState(false);
@@ -50,6 +232,11 @@ export default function SimilaridadePage() {
   const [results, setResults] = useState<SimilarityResultItem[] | null>(null);
   const [resultWarnings, setResultWarnings] = useState<string[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Tracking se já tentámos restaurar do sessionStorage (evita reentrância).
+  const cacheRestoreAttempted = useRef(false);
+  // Tracking se já tentámos hidratar anchor a partir do URL (1x).
+  const anchorHydrationAttempted = useRef(false);
 
   // Bulk action UI
   const [shortlistMenuOpen, setShortlistMenuOpen] = useState(false);
@@ -70,6 +257,55 @@ export default function SimilaridadePage() {
       .then((r) => r.json())
       .then((j) => setProfiles(j.profiles ?? []));
   }, []);
+
+  // ── Hidratar anchor a partir do URL (1x) ─────────────────────────────
+  // Se URL tem anchor_pool + anchor_player, busca dados do jogador para
+  // construir o AnchorSelection. Edge cases tratados em readInitialFromUrl
+  // (anchor_player sem anchor_pool → ignorado, anchorPlayerId=null).
+  useEffect(() => {
+    if (anchorHydrationAttempted.current) return;
+    if (!initialFromUrl.anchorPlayerId || !initialFromUrl.anchorPoolId) return;
+    anchorHydrationAttempted.current = true;
+    const playerId = initialFromUrl.anchorPlayerId;
+    const poolId = initialFromUrl.anchorPoolId;
+    fetch(`/api/players/${playerId}`)
+      .then((r) => r.json())
+      .then((j) => {
+        const p = j.player;
+        if (!p) return;
+        setAnchor({
+          pool_id: poolId,
+          pool_name: '',
+          player_id: p.id,
+          player_name: p.name,
+          current_team: p.current_team ?? null,
+          team_in_period: p.team_in_period ?? null,
+          position_primary: p.position_primary ?? null,
+          age: p.age ?? null,
+          minutes_played: p.minutes_played ?? null,
+        });
+      })
+      .catch(() => {
+        // Edge case: player id no URL não existe / fetch falha → ignora
+        // silenciosamente. Form fica com anchor=null; user reconfigura.
+      });
+  }, [initialFromUrl.anchorPlayerId, initialFromUrl.anchorPoolId]);
+
+  // ── Validar lens=profile contra lista de profiles carregada ──────────
+  // Edge case 4: URL tem profile_id que não pertence ao user / não existe.
+  // Degrada lens para 'full' (sem error UI).
+  useEffect(() => {
+    if (profiles.length === 0) return;
+    if (lens.mode !== 'profile') return;
+    const found = profiles.some((p) => p.id === lens.profile_id);
+    if (!found) {
+      console.warn(
+        `[similaridade] profile_id ${lens.profile_id} não encontrado — degrada lens para full.`
+      );
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLens({ mode: 'full' });
+    }
+  }, [profiles, lens]);
 
   // Quando a âncora muda, propor target pools (default: pool da âncora) e
   // posições (default: arquétipo da âncora).
@@ -104,6 +340,81 @@ export default function SimilaridadePage() {
     // resolve a regra de exhaustive-deps sem re-correr efeito por reference.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchorPlayerId, anchorPoolIdForEffect, arquetypePositionsKey]);
+
+  // ── Sincronizar URL com form state ──────────────────────────────────
+  // Escreve sempre que algum input do form muda. router.replace (não push)
+  // — não polui o histórico do browser. lens=custom NÃO entra no URL.
+  useEffect(() => {
+    const params = buildSearchParams({
+      anchorPoolId: anchor?.pool_id ?? anchorPoolId,
+      anchorPlayerId: anchor?.player_id ?? null,
+      targetPoolIds,
+      positions,
+      minMinutes,
+      ageMin,
+      ageMax,
+      lens,
+    });
+    const next = params.toString();
+    const current = searchParams.toString();
+    if (next !== current) {
+      router.replace(next ? `/similaridade?${next}` : '/similaridade', { scroll: false });
+    }
+  }, [
+    anchor,
+    anchorPoolId,
+    targetPoolIds,
+    positions,
+    minMinutes,
+    ageMin,
+    ageMax,
+    lens,
+    router,
+    searchParams,
+  ]);
+
+  // ── Restaurar resultados a partir do sessionStorage (1x) ─────────────
+  // Só corre depois do anchor estar hidratado (se havia anchor no URL) E
+  // dos profiles estarem carregados (para a validação de lens=profile).
+  // Computa o queryKey do form actual e compara com o cached.
+  useEffect(() => {
+    if (cacheRestoreAttempted.current) return;
+    // Aguarda anchor hidratado se URL pediu (evita match parcial).
+    if (initialFromUrl.anchorPlayerId && !anchor) return;
+    // Aguarda profiles para garantir que lens não está prestes a degradar.
+    if (initialFromUrl.lens.mode === 'profile' && profiles.length === 0) return;
+    cacheRestoreAttempted.current = true;
+
+    const currentKey = canonicalQueryKey({
+      anchorPoolId: anchor?.pool_id ?? '',
+      anchorPlayerId: anchor?.player_id ?? null,
+      targetPoolIds,
+      positions,
+      minMinutes,
+      ageMin,
+      ageMax,
+      lens,
+    });
+    const cached = loadFromCache();
+    if (cached && cached.queryKey === currentKey) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setResults(cached.candidates);
+      setResultWarnings(cached.warnings);
+    }
+    // Edge case 6: URL completa mas cache absent / queryKey mismatch →
+    // results fica null, user clica "Encontrar parecidos" para correr.
+  }, [
+    anchor,
+    profiles,
+    initialFromUrl.anchorPlayerId,
+    initialFromUrl.lens.mode,
+    targetPoolIds,
+    positions,
+    minMinutes,
+    ageMin,
+    ageMax,
+    lens,
+  ]);
 
   // Fechar dropdowns ao clicar fora
   useEffect(() => {
@@ -200,8 +511,29 @@ export default function SimilaridadePage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Erro a procurar parecidos.');
-      setResults(json.candidates ?? []);
-      setResultWarnings(json.warnings ?? []);
+      const candidates = (json.candidates ?? []) as SimilarityResultItem[];
+      const warnings = (json.warnings ?? []) as string[];
+      setResults(candidates);
+      setResultWarnings(warnings);
+      // Persistir em sessionStorage com queryKey canónico para restauro
+      // após drill-down. queryKey inclui lens=custom weights → mismatch
+      // se user mudar pesos depois de submeter (cache miss correcto).
+      const queryKey = canonicalQueryKey({
+        anchorPoolId: anchor.pool_id,
+        anchorPlayerId: anchor.player_id,
+        targetPoolIds,
+        positions: positionsInArquetype,
+        minMinutes,
+        ageMin,
+        ageMax,
+        lens,
+      });
+      saveToCache({
+        queryKey,
+        candidates,
+        warnings,
+        cached_at: new Date().toISOString(),
+      });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -696,5 +1028,20 @@ function BulkAddPopover({
         )}
       </div>
     </div>
+  );
+}
+
+// useSearchParams() exige boundary de Suspense em Next.js App Router.
+export default function SimilaridadePage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-neutral-50 py-10">
+          <div className="mx-auto max-w-5xl px-6 text-sm text-neutral-500">A carregar…</div>
+        </main>
+      }
+    >
+      <SimilaridadeContent />
+    </Suspense>
   );
 }

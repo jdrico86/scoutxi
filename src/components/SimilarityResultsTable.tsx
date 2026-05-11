@@ -27,6 +27,8 @@ type Props = {
   onToggleSelect: (id: string) => void;
   onToggleSelectAll: () => void;
   onOpenPlayer: (id: string) => void;
+  /** Drill-down: parent constrói a URL completa com anchor + candidate. */
+  onCompare: (candidateId: string) => void;
 };
 
 /**
@@ -69,6 +71,7 @@ export function SimilarityResultsTable({
   onToggleSelect,
   onToggleSelectAll,
   onOpenPlayer,
+  onCompare,
 }: Props) {
   const allSelected = items.length > 0 && items.every((p) => selectedIds.has(p.player_id));
   const someSelected = items.some((p) => selectedIds.has(p.player_id));
@@ -181,6 +184,24 @@ export function SimilarityResultsTable({
                           .join(' · ')}
                       </div>
                     )}
+                  </div>
+
+                  {/* Acções por linha */}
+                  <div className="mt-2 flex items-center gap-3 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => onCompare(it.player.id)}
+                      className="rounded-md border border-neutral-300 px-2 py-0.5 text-neutral-700 hover:bg-neutral-50"
+                    >
+                      Comparar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onOpenPlayer(it.player.id)}
+                      className="text-neutral-500 hover:text-neutral-800 hover:underline"
+                    >
+                      Abrir ficha
+                    </button>
                   </div>
                 </div>
               </div>

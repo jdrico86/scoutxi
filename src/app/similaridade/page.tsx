@@ -544,6 +544,12 @@ export default function SimilaridadePage() {
                 onToggleSelect={toggleSelect}
                 onToggleSelectAll={toggleSelectAll}
                 onOpenPlayer={(id) => router.push(`/players/${id}`)}
+                onCompare={(id) =>
+                  anchor &&
+                  router.push(
+                    `/similaridade/comparar?a=${encodeURIComponent(anchor.player_id)}&b=${encodeURIComponent(id)}`
+                  )
+                }
               />
             )}
           </section>

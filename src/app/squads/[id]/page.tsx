@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Pencil, Trash2, X, Plus, Search, Check } from 'lucide-react';
 import { FORMATIONS, getFormation, type FormationDef, type SlotDef } from '@/lib/best-eleven/formations';
+import { ModalShell } from '@/components/ModalShell';
 
 type SquadPlayer = {
   player_id: string;
@@ -934,49 +935,6 @@ function AddPlayerModal({
         </div>
       )}
     </ModalShell>
-  );
-}
-
-// ── Modal shell ──────────────────────────────────────────────────────────
-function ModalShell({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-40 flex items-start justify-center bg-black/40 p-4 sm:items-center"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-md rounded-lg border border-neutral-200 bg-white shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-neutral-100 px-4 py-3">
-          <h3 className="text-sm font-semibold text-neutral-900">{title}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
-          >
-            <X className="h-4 w-4" strokeWidth={2} />
-          </button>
-        </div>
-        <div className="p-4">{children}</div>
-      </div>
-    </div>
   );
 }
 

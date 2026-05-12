@@ -30,13 +30,19 @@ type SquadSummary = { id: string; name: string; formation: string };
 // ── State preservation: URL params + sessionStorage ───────────────────────
 //
 // URL preserva inputs do form (anchor, pools, positions, age, minutes,
-// lens=full|profile, profile_id). lens=custom NÃO entra no URL — fica em
-// React state apenas (weights complexos; trade-off documentado).
+// lens=full|profile, profile_id). lens=custom NÃO entra no URL — fica
+// session-only (weights complexos; trade-off documentado).
 //
-// sessionStorage cacheia resultados com queryKey canónico que captura o
-// snapshot completo do form (incluindo weights de lens=custom). Ao voltar
-// do drill-down: lê URL → hidrata form → compara queryKey → se bate,
-// restaura resultados sem fetch; se não bate, form preenchido sem results.
+// sessionStorage cacheia { url, lens, candidates, warnings }. A url é a
+// query string ao momento de save (subconjunto serializável do form).
+// Ao voltar do drill-down: lê URL → hidrata form a partir do URL → se
+// existir cache E a url do cache bate com a url construída do form
+// actual, restaura lens (incl. custom weights) e resultados sem fetch.
+// Se url não bate (algum filtro URL-derivable mudou), discard.
+//
+// Princípio: a url determina "esta query"; lens é o único campo
+// session-only que precisa de payload em sessionStorage para
+// preservação através de navegação (drill-down → back).
 const CACHE_KEY = 'scout-similarity-cache';
 const DEFAULT_MIN_MINUTES = 600;
 
@@ -121,51 +127,28 @@ function buildSearchParams(snapshot: {
     params.set('lens', 'profile');
     params.set('profile_id', snapshot.lens.profile_id);
   }
-  return params;
-}
 
-/**
- * Devolve string canónica que identifica unicamente a query. Inclui o
- * snapshot completo do form (incl. lens=custom weights). Usada como key
- * no sessionStorage para validar se os resultados em cache batem com o
- * form actual.
- */
-function canonicalQueryKey(snapshot: {
-  anchorPoolId: string;
-  anchorPlayerId: string | null;
-  targetPoolIds: string[];
-  positions: string[];
-  minMinutes: number;
-  ageMin: string;
-  ageMax: string;
-  lens: Lens;
-}): string {
-  let lensCanon: unknown;
-  if (snapshot.lens.mode === 'custom') {
-    const sortedWeights: Record<string, number> = {};
-    for (const k of Object.keys(snapshot.lens.weights).sort()) {
-      sortedWeights[k] = snapshot.lens.weights[k];
-    }
-    lensCanon = { mode: 'custom', weights: sortedWeights };
-  } else if (snapshot.lens.mode === 'profile') {
-    lensCanon = { mode: 'profile', profile_id: snapshot.lens.profile_id };
-  } else {
-    lensCanon = { mode: 'full' };
+  // Determinismo: re-ordenar as keys alfabeticamente (binary compare, sem
+  // localeCompare — locale-independent). URLSearchParams preserva insertion
+  // order, frágil contra refactor que reordene os .set() acima OU contra
+  // URL vinda de fora (link partilhado, edição manual) com ordem diferente.
+  // Side effect cosmético: address bar fica em ordem alfabética.
+  const sorted = new URLSearchParams();
+  for (const [k, v] of [...params.entries()].sort()) {
+    sorted.append(k, v);
   }
-  return JSON.stringify({
-    a_pool: snapshot.anchorPoolId || null,
-    a_player: snapshot.anchorPlayerId || null,
-    pools: [...snapshot.targetPoolIds].sort(),
-    positions: [...snapshot.positions].sort(),
-    mm: snapshot.minMinutes,
-    a_min: snapshot.ageMin.trim() || null,
-    a_max: snapshot.ageMax.trim() || null,
-    lens: lensCanon,
-  });
+  return sorted;
 }
 
 type CacheEntry = {
-  queryKey: string;
+  // URL params string ao momento de save (resultado de buildSearchParams).
+  // Identifica unicamente os inputs URL-serializáveis. Comparado com a URL
+  // do form actual para decidir se o cache é válido.
+  url: string;
+  // Snapshot da lens (inclui weights de custom se aplicável). Restaurada
+  // se url bate — preserva lens=custom através de drill-down (lens=custom
+  // não entra no URL por design, weights complexos).
+  lens: Lens;
   candidates: SimilarityResultItem[];
   warnings: string[];
   cached_at: string;
@@ -183,13 +166,17 @@ function saveToCache(entry: CacheEntry): void {
 
 function loadFromCache(): CacheEntry | null {
   // Edge case 2: JSON malformado / shape inesperado → trata como cache absent.
+  // Inclui rejeição de entries do shape antigo (queryKey-based) — ficam
+  // implicitamente inválidas após este upgrade.
   try {
     const raw = sessionStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (
       !parsed ||
-      typeof parsed.queryKey !== 'string' ||
+      typeof parsed.url !== 'string' ||
+      !parsed.lens ||
+      typeof parsed.lens.mode !== 'string' ||
       !Array.isArray(parsed.candidates) ||
       !Array.isArray(parsed.warnings)
     ) {
@@ -375,8 +362,9 @@ function SimilaridadeContent() {
 
   // ── Restaurar resultados a partir do sessionStorage (1x) ─────────────
   // Só corre depois do anchor estar hidratado (se havia anchor no URL) E
-  // dos profiles estarem carregados (para a validação de lens=profile).
-  // Computa o queryKey do form actual e compara com o cached.
+  // dos profiles estarem carregados (para validação de lens=profile).
+  // Compara URL params do form actual com cached.url. Se match, restaura
+  // cached.lens (preserva lens=custom + weights) e os resultados.
   useEffect(() => {
     if (cacheRestoreAttempted.current) return;
     // Aguarda anchor hidratado se URL pediu (evita match parcial).
@@ -385,7 +373,15 @@ function SimilaridadeContent() {
     if (initialFromUrl.lens.mode === 'profile' && profiles.length === 0) return;
     cacheRestoreAttempted.current = true;
 
-    const currentKey = canonicalQueryKey({
+    const cached = loadFromCache();
+    if (!cached) return;
+
+    // Construir URL do form actual e comparar com a URL ao momento de save.
+    // Nota: para a comparação, usamos a lens ACTUAL (do URL) — porque o
+    // próprio cache.url foi construído com a mesma regra (lens=custom não
+    // entra no URL). Ou seja, a comparação dá match se todos os campos
+    // URL-serializáveis batem entre o form actual e o save anterior.
+    const currentUrl = buildSearchParams({
       anchorPoolId: anchor?.pool_id ?? '',
       anchorPlayerId: anchor?.player_id ?? null,
       targetPoolIds,
@@ -394,14 +390,16 @@ function SimilaridadeContent() {
       ageMin,
       ageMax,
       lens,
-    });
-    const cached = loadFromCache();
-    if (cached && cached.queryKey === currentKey) {
+    }).toString();
+
+    if (currentUrl === cached.url) {
+      // Match → restaura lens (incluindo weights de custom) e resultados.
       // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLens(cached.lens);
       setResults(cached.candidates);
       setResultWarnings(cached.warnings);
     }
-    // Edge case 6: URL completa mas cache absent / queryKey mismatch →
+    // Edge case 6: URL completa mas cache absent / url mismatch →
     // results fica null, user clica "Encontrar parecidos" para correr.
   }, [
     anchor,
@@ -515,10 +513,10 @@ function SimilaridadeContent() {
       const warnings = (json.warnings ?? []) as string[];
       setResults(candidates);
       setResultWarnings(warnings);
-      // Persistir em sessionStorage com queryKey canónico para restauro
-      // após drill-down. queryKey inclui lens=custom weights → mismatch
-      // se user mudar pesos depois de submeter (cache miss correcto).
-      const queryKey = canonicalQueryKey({
+      // Persistir em sessionStorage com a URL do form ao momento de save +
+      // snapshot da lens (incl. weights de custom — não entra no URL).
+      // Ao voltar do drill-down, se a URL bate restauramos lens + results.
+      const savedUrl = buildSearchParams({
         anchorPoolId: anchor.pool_id,
         anchorPlayerId: anchor.player_id,
         targetPoolIds,
@@ -527,9 +525,10 @@ function SimilaridadeContent() {
         ageMin,
         ageMax,
         lens,
-      });
+      }).toString();
       saveToCache({
-        queryKey,
+        url: savedUrl,
+        lens,
         candidates,
         warnings,
         cached_at: new Date().toISOString(),

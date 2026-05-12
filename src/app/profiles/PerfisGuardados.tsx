@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FavoriteStar } from '@/components/FavoriteStar';
 import { formatPoolName } from '@/lib/pools';
@@ -94,13 +94,20 @@ export function PerfisGuardados() {
   }, []);
 
   useEffect(() => {
+    // loadProfiles é function call que internamente faz setState (setProfiles).
+    // eslint flagga como set-state-in-effect mas o pattern é genuíno —
+    // estamos a sincronizar com sistema externo (Supabase) no mount.
+    // Mesmo precedente em squads/[id]/page.tsx.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadProfiles();
     fetch('/api/pools')
       .then((r) => r.json())
       .then((j) => setPools(j.pools ?? []));
   }, [loadProfiles]);
-  // Auto-apply quando chegamos com params + listas já carregadas
-  const [autoAppliedOnce, setAutoAppliedOnce] = useState(false);
+  // Auto-apply quando chegamos com params + listas já carregadas.
+  // Ref em vez de state: gating idempotente sem causar re-render (não
+  // displayed na UI) e sem disparar warning set-state-in-effect.
+  const autoAppliedOnceRef = useRef(false);
 
   const runScore = useCallback(async () => {
     if (!selectedProfileId || !selectedPoolId) return;
@@ -124,14 +131,20 @@ export function PerfisGuardados() {
     }
   }, [selectedProfileId, selectedPoolId]);
 
-  // Se chegamos à página com params + listas já carregadas, corre score automaticamente
+  // Se chegamos à página com params + listas já carregadas, corre score automaticamente.
+  // runScore = useCallback([selectedProfileId, selectedPoolId]) é estável face às
+  // outras deps; o ref guard impede re-fire mesmo que runScore mude por mudança
+  // de profile/pool após o primeiro auto-apply.
   useEffect(() => {
-    if (autoAppliedOnce) return;
+    if (autoAppliedOnceRef.current) return;
     if (!selectedProfileId || !selectedPoolId) return;
     if (profiles.length === 0 || pools.length === 0) return;
-    setAutoAppliedOnce(true);
+    autoAppliedOnceRef.current = true;
+    // runScore é function call que internamente faz setState — mesmo
+    // pattern de loadProfiles (sincronização com sistema externo).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     runScore();
-  }, [autoAppliedOnce, selectedProfileId, selectedPoolId, profiles.length, pools.length, runScore]);
+  }, [selectedProfileId, selectedPoolId, profiles.length, pools.length, runScore]);
 
   const handleDuplicate = useCallback(
     async (profileId: string) => {

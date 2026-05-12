@@ -688,10 +688,8 @@ function CompareSearchBar({
 
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
-    if (q.trim().length < 2) {
-      setResults([]);
-      return;
-    }
+    // q < 2 → não disparamos a busca; JSX já hide o dropdown via `q.trim().length >= 2` guard.
+    if (q.trim().length < 2) return;
     timer.current = setTimeout(async () => {
       setSearching(true);
       try {

@@ -255,6 +255,16 @@ export function PerfisGuardados() {
                       <div className="flex justify-end gap-1">
                         <button
                           type="button"
+                          onClick={() =>
+                            router.push(`/similaridade?lens=profile&profile_id=${p.id}`)
+                          }
+                          className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
+                          title="Procurar jogadores parecidos usando este perfil como lente"
+                        >
+                          Pesquisar similares
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => router.push(`/profiles/${p.id}/edit`)}
                           className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
                         >

@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Plus, Search, FileText, Pencil } from 'lucide-react';
+import { X, Plus, Search, FileText, Pencil, UserSearch } from 'lucide-react';
 import { FavoriteStar } from '@/components/FavoriteStar';
 import { ShortlistMenu } from '@/components/ShortlistMenu';
 import { AddToSquadMenu } from '@/components/AddToSquadMenu';
@@ -385,6 +385,21 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                       <Plus className="h-3.5 w-3.5" strokeWidth={2} />
                       Comparar com outro
                     </button>
+                    {pool && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          router.push(
+                            `/similaridade?anchor_pool=${encodeURIComponent(pool.id)}&anchor_player=${encodeURIComponent(id)}`
+                          )
+                        }
+                        className="flex items-center gap-1.5 rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                        title="Procurar jogadores parecidos com este"
+                      >
+                        <UserSearch className="h-3.5 w-3.5" strokeWidth={2} />
+                        Encontrar parecidos
+                      </button>
+                    )}
                   </>
                 )}
                 {compareData && (

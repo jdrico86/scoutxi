@@ -608,6 +608,16 @@ function SimilaridadeContent() {
 
   const minutesWarning = minMinutes < 600;
 
+  // Empty state especial quando o servidor reporta que a âncora não tem
+  // percentis calculados (necessita recalculate por admin). Pattern-match
+  // resiliente na string do erro.
+  const percentilesNotCalculated =
+    error?.toLowerCase().includes('percentis calculados') ?? false;
+
+  // Indicador inicial: pools ainda não carregadas. Subtil — usado apenas
+  // para feedback durante o primeiro paint.
+  const initialLoading = pools.length === 0;
+
   return (
     <main className="min-h-screen bg-neutral-50 py-10">
       <div className="mx-auto max-w-5xl px-6">
@@ -618,6 +628,12 @@ function SimilaridadeContent() {
             Comparação por percentis dentro da pool de cada jogador — moneyball: top-10% num
             pool ≈ top-10% noutro, independente de magnitudes brutas.
           </p>
+          {initialLoading && (
+            <p className="mt-2 flex items-center gap-2 text-xs text-neutral-400">
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-neutral-300" />
+              A carregar opções (pools, métricas, perfis)…
+            </p>
+          )}
         </header>
 
         {/* ── Âncora ─────────────────────────────────────────────────── */}
@@ -766,7 +782,9 @@ function SimilaridadeContent() {
           >
             {loading ? 'A procurar…' : 'Encontrar parecidos'}
           </button>
-          {error && <span className="text-sm text-red-700">{error}</span>}
+          {error && !percentilesNotCalculated && (
+            <span className="text-sm text-red-700">{error}</span>
+          )}
           {!canSearch && !error && (
             <span className="text-xs text-neutral-500">
               {!anchor
@@ -782,8 +800,51 @@ function SimilaridadeContent() {
           )}
         </div>
 
+        {/* ── Empty state: âncora sem percentis calculados ─────────────── */}
+        {percentilesNotCalculated && (
+          <section className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-5">
+            <h2 className="text-sm font-semibold text-amber-900">
+              Pool sem percentis calculados
+            </h2>
+            <p className="mt-1 text-sm text-amber-800">
+              A pool da âncora ainda não tem percentis pré-calculados na tabela
+              <code className="mx-1 rounded bg-amber-100 px-1 py-0.5 font-mono text-xs">
+                player_percentiles
+              </code>
+              — sem isso a similaridade não consegue comparar.
+            </p>
+            <p className="mt-2 text-xs text-amber-700">
+              Admin: corre{' '}
+              <code className="rounded bg-amber-100 px-1 py-0.5 font-mono">
+                POST /api/admin/recalculate-percentiles
+              </code>{' '}
+              com{' '}
+              <code className="rounded bg-amber-100 px-1 py-0.5 font-mono">
+                {'{ pool_id: "<id>" }'}
+              </code>{' '}
+              ou{' '}
+              <code className="rounded bg-amber-100 px-1 py-0.5 font-mono">
+                {'{ all: true }'}
+              </code>
+              . Após import wyscout o recalculate é automático; este estado
+              indica uma pool que existia antes da feature de Similaridade
+              ou um import com falha no hook de recalculate.
+            </p>
+          </section>
+        )}
+
+        {/* ── Skeleton durante search ──────────────────────────────────── */}
+        {loading && (
+          <section className="mt-6 overflow-hidden rounded-lg border border-neutral-200 bg-white">
+            <div className="border-b border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-500">
+              A procurar jogadores parecidos…
+            </div>
+            <ResultsSkeleton />
+          </section>
+        )}
+
         {/* ── Resultados ─────────────────────────────────────────────── */}
-        {results && (
+        {results && !loading && (
           <section className="mt-6 overflow-hidden rounded-lg border border-neutral-200 bg-white">
             {/* Bulk action bar */}
             {selectedIds.size > 0 ? (
@@ -865,8 +926,19 @@ function SimilaridadeContent() {
             )}
 
             {results.length === 0 ? (
-              <div className="p-6 text-sm text-neutral-500">
-                Nenhum jogador parecido encontrado com estes filtros.
+              <div className="p-6">
+                <p className="text-sm text-neutral-700">
+                  Nenhum jogador satisfaz os filtros.
+                </p>
+                <p className="mt-2 text-xs text-neutral-500">
+                  Sugestões para alargar a pesquisa:
+                </p>
+                <ul className="mt-1 list-inside list-disc space-y-0.5 text-xs text-neutral-500">
+                  <li>Reduzir <strong>min minutos</strong> (default 600 — abaixo desse os percentis são ruído, mas para reconhecimento de talento jovem ~300 pode revelar candidatos).</li>
+                  <li>Alargar o <strong>intervalo de idade</strong>.</li>
+                  <li>Adicionar mais <strong>pools-alvo</strong> (cross-pool revela frequentemente mais candidatos que single-pool).</li>
+                  <li>Mudar para <strong>lens: perfil completo</strong> se estavas em perfil ou custom restritivo.</li>
+                </ul>
               </div>
             ) : (
               <SimilarityResultsTable
@@ -1042,5 +1114,38 @@ export default function SimilaridadePage() {
     >
       <SimilaridadeContent />
     </Suspense>
+  );
+}
+
+// ── Skeleton ────────────────────────────────────────────────────────────
+// Cards placeholder mostrados durante search (loading=true). Mimica o
+// layout do SimilarityResultsTable item (checkbox + name row + barra +
+// linhas de "parecidos em / diferentes em").
+function ResultsSkeleton() {
+  return (
+    <ul className="divide-y divide-neutral-100" aria-busy="true" aria-label="A carregar resultados">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <li key={i} className="px-4 py-3">
+          <div className="flex items-start gap-3">
+            <div className="mt-1 h-3.5 w-3.5 shrink-0 animate-pulse rounded bg-neutral-200" />
+            <div className="flex-1 space-y-2">
+              <div className="flex items-center gap-3">
+                <div className="h-4 w-6 animate-pulse rounded bg-neutral-100" />
+                <div className="h-4 w-40 animate-pulse rounded bg-neutral-200" />
+                <div className="h-3 w-24 animate-pulse rounded bg-neutral-100" />
+                <div className="h-3 w-10 animate-pulse rounded bg-neutral-100" />
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="h-2 w-40 animate-pulse rounded-full bg-neutral-200" />
+                <div className="h-4 w-14 animate-pulse rounded bg-neutral-200" />
+                <div className="h-3 w-28 animate-pulse rounded bg-neutral-100" />
+              </div>
+              <div className="h-3 w-2/3 animate-pulse rounded bg-neutral-100" />
+              <div className="h-3 w-1/2 animate-pulse rounded bg-neutral-100" />
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }

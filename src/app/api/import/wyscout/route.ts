@@ -26,7 +26,7 @@ const BATCH_STATS = 1000;
  *   competition: string          (opcional)
  *   source:      string          (opcional, default "wyscout")
  *
- * Comportamento: upsert por (pool_id, name, current_team).
+ * Comportamento: upsert por (pool_id, name, current_team, height_cm, foot).
  *   - Re-importar o mesmo pool: apaga stats antigas dos jogadores re-encontrados
  *     e recria, mantém metadados actualizados.
  */
@@ -133,8 +133,25 @@ export async function POST(req: NextRequest) {
   //    Paginado para evitar o limite implícito de 1000 do PostgREST — em pools
   //    grandes (CdP) o dedupe falhava silenciosamente e jogadores eram
   //    re-inseridos como duplicados em vez de actualizados.
-  const keyOf = (name: string, team: string | null | undefined, age: number | null | undefined) =>
-    `${name.toLowerCase()}::${(team ?? '').toLowerCase()}::${age ?? ''}`;
+  //    A chave NÃO pode incluir a idade: o Wyscout escreve-a à data do export,
+  //    por isso quem faz anos entre importações deixava de bater certo e era
+  //    re-inserido como jogador novo. Foi a causa dos 202 órfãos em CP 25/26 e
+  //    de 142 duplicados em CP 26/27 na J8. Altura e pé não mudam entre exports;
+  //    sobre os 158 pares duplicados da J8, 154 tinham altura e pé iguais.
+  const keyOf = (
+    name: string,
+    team: string | null | undefined,
+    height: number | null | undefined,
+    foot: string | null | undefined
+  ) => {
+    const h =
+      height === null || height === undefined || Number.isNaN(Number(height))
+        ? ''
+        : String(Math.round(Number(height)));
+    return `${name.trim().toLowerCase()}::${(team ?? '').trim().toLowerCase()}::${h}::${(foot ?? '')
+      .trim()
+      .toLowerCase()}`;
+  };
 
   const existingByKey = new Map<string, string>(); // key -> player_id
   const EXISTING_PAGE = 1000;
@@ -142,7 +159,7 @@ export async function POST(req: NextRequest) {
   while (true) {
     const { data: page, error: existingErr } = await supabase
       .from('players')
-      .select('id, name, current_team, age')
+      .select('id, name, current_team, height_cm, foot')
       .eq('pool_id', poolId)
       .range(existingFrom, existingFrom + EXISTING_PAGE - 1);
     if (existingErr) {
@@ -153,7 +170,7 @@ export async function POST(req: NextRequest) {
     }
     if (!page || page.length === 0) break;
     for (const p of page) {
-      existingByKey.set(keyOf(p.name, p.current_team, p.age), p.id);
+      existingByKey.set(keyOf(p.name, p.current_team, p.height_cm, p.foot), p.id);
     }
     if (page.length < EXISTING_PAGE) break;
     existingFrom += EXISTING_PAGE;
@@ -168,8 +185,9 @@ export async function POST(req: NextRequest) {
   for (const p of parsed.players) {
     const name = String(p.data.name);
     const team = (p.data.current_team as string | null | undefined) ?? null;
-    const age = (p.data.age as number | null | undefined) ?? null;
-    const key = keyOf(name, team, age);
+    const height = (p.data.height_cm as number | null | undefined) ?? null;
+    const foot = (p.data.foot as string | null | undefined) ?? null;
+    const key = keyOf(name, team, height, foot);
     const existingId = existingByKey.get(key);
 
     if (existingId) {
@@ -184,12 +202,15 @@ export async function POST(req: NextRequest) {
   let insertedCount = 0;
   for (let i = 0; i < toInsert.length; i += BATCH_PLAYERS) {
     const batch = toInsert.slice(i, i + BATCH_PLAYERS);
-    const { data, error } = await supabase.from('players').insert(batch).select('id, name, current_team, age');
+    const { data, error } = await supabase
+      .from('players')
+      .insert(batch)
+      .select('id, name, current_team, height_cm, foot');
     if (error) {
       return NextResponse.json({ error: `Erro a inserir jogadores: ${error.message}` }, { status: 500 });
     }
     for (const p of data ?? []) {
-      existingByKey.set(keyOf(p.name, p.current_team, p.age), p.id);
+      existingByKey.set(keyOf(p.name, p.current_team, p.height_cm, p.foot), p.id);
     }
     insertedCount += data?.length ?? 0;
   }
@@ -197,7 +218,14 @@ export async function POST(req: NextRequest) {
   // Agora que todos os IDs existem, preenchemos rowToPlayerId também para os novos
   for (const p of parsed.players) {
     if (rowToPlayerId.has(p.rowIndex)) continue;
-    const id = existingByKey.get(keyOf(String(p.data.name), (p.data.current_team as string | null) ?? null, (p.data.age as number | null) ?? null));
+    const id = existingByKey.get(
+      keyOf(
+        String(p.data.name),
+        (p.data.current_team as string | null) ?? null,
+        (p.data.height_cm as number | null) ?? null,
+        (p.data.foot as string | null) ?? null
+      )
+    );
     if (id) rowToPlayerId.set(p.rowIndex, id);
   }
 

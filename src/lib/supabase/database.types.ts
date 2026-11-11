@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      allowed_users: {
+        Row: {
+          added_at: string | null
+          email: string
+          is_admin: boolean
+          notes: string | null
+        }
+        Insert: {
+          added_at?: string | null
+          email: string
+          is_admin?: boolean
+          notes?: string | null
+        }
+        Update: {
+          added_at?: string | null
+          email?: string
+          is_admin?: boolean
+          notes?: string | null
+        }
+        Relationships: []
+      }
       metrics: {
         Row: {
           category: string
@@ -51,6 +72,7 @@ export type Database = {
           id: string
           note: string | null
           owner: string | null
+          owner_id: string | null
           player_id: string
           status: string | null
           updated_at: string | null
@@ -61,6 +83,7 @@ export type Database = {
           id?: string
           note?: string | null
           owner?: string | null
+          owner_id?: string | null
           player_id: string
           status?: string | null
           updated_at?: string | null
@@ -71,6 +94,7 @@ export type Database = {
           id?: string
           note?: string | null
           owner?: string | null
+          owner_id?: string | null
           player_id?: string
           status?: string | null
           updated_at?: string | null
@@ -81,6 +105,55 @@ export type Database = {
             columns: ["player_id"]
             isOneToOne: false
             referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      player_percentiles: {
+        Row: {
+          metric_code: string
+          percentile: number
+          player_id: string
+          pool_id: string
+          position: string
+          raw_value: number | null
+        }
+        Insert: {
+          metric_code: string
+          percentile: number
+          player_id: string
+          pool_id: string
+          position: string
+          raw_value?: number | null
+        }
+        Update: {
+          metric_code?: string
+          percentile?: number
+          player_id?: string
+          pool_id?: string
+          position?: string
+          raw_value?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "player_percentiles_metric_code_fkey"
+            columns: ["metric_code"]
+            isOneToOne: false
+            referencedRelation: "metrics"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "player_percentiles_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "player_percentiles_pool_id_fkey"
+            columns: ["pool_id"]
+            isOneToOne: false
+            referencedRelation: "pools"
             referencedColumns: ["id"]
           },
         ]
@@ -151,6 +224,7 @@ export type Database = {
           pool_id: string
           position_primary: string | null
           positions_secondary: string[] | null
+          team_in_period: string | null
           weight_kg: number | null
         }
         Insert: {
@@ -173,6 +247,7 @@ export type Database = {
           pool_id: string
           position_primary?: string | null
           positions_secondary?: string[] | null
+          team_in_period?: string | null
           weight_kg?: number | null
         }
         Update: {
@@ -195,6 +270,7 @@ export type Database = {
           pool_id?: string
           position_primary?: string | null
           positions_secondary?: string[] | null
+          team_in_period?: string | null
           weight_kg?: number | null
         }
         Relationships: [
@@ -202,6 +278,41 @@ export type Database = {
             foreignKeyName: "players_pool_id_fkey"
             columns: ["pool_id"]
             isOneToOne: false
+            referencedRelation: "pools"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pool_coefficients: {
+        Row: {
+          captured_at: string
+          confidence: string
+          notes: string | null
+          pool_id: string
+          source: string
+          strength_factor: number
+        }
+        Insert: {
+          captured_at?: string
+          confidence: string
+          notes?: string | null
+          pool_id: string
+          source: string
+          strength_factor: number
+        }
+        Update: {
+          captured_at?: string
+          confidence?: string
+          notes?: string | null
+          pool_id?: string
+          source?: string
+          strength_factor?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pool_coefficients_pool_id_fkey"
+            columns: ["pool_id"]
+            isOneToOne: true
             referencedRelation: "pools"
             referencedColumns: ["id"]
           },
@@ -251,6 +362,7 @@ export type Database = {
           id: string
           name: string
           owner: string | null
+          owner_id: string | null
           tags: string[] | null
           updated_at: string | null
           weights: Json | null
@@ -262,6 +374,7 @@ export type Database = {
           id?: string
           name: string
           owner?: string | null
+          owner_id?: string | null
           tags?: string[] | null
           updated_at?: string | null
           weights?: Json | null
@@ -273,6 +386,7 @@ export type Database = {
           id?: string
           name?: string
           owner?: string | null
+          owner_id?: string | null
           tags?: string[] | null
           updated_at?: string | null
           weights?: Json | null
@@ -281,42 +395,42 @@ export type Database = {
       }
       shortlist_players: {
         Row: {
-          shortlist_id: string
-          player_id: string
           added_at: string | null
-          snapshot_score: number | null
-          snapshot_rank: number | null
+          player_id: string
+          shortlist_id: string
           shortlist_note: string | null
+          snapshot_rank: number | null
+          snapshot_score: number | null
         }
         Insert: {
-          shortlist_id: string
-          player_id: string
           added_at?: string | null
-          snapshot_score?: number | null
-          snapshot_rank?: number | null
+          player_id: string
+          shortlist_id: string
           shortlist_note?: string | null
+          snapshot_rank?: number | null
+          snapshot_score?: number | null
         }
         Update: {
-          shortlist_id?: string
-          player_id?: string
           added_at?: string | null
-          snapshot_score?: number | null
-          snapshot_rank?: number | null
+          player_id?: string
+          shortlist_id?: string
           shortlist_note?: string | null
+          snapshot_rank?: number | null
+          snapshot_score?: number | null
         }
         Relationships: [
-          {
-            foreignKeyName: "shortlist_players_shortlist_id_fkey"
-            columns: ["shortlist_id"]
-            isOneToOne: false
-            referencedRelation: "shortlists"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "shortlist_players_player_id_fkey"
             columns: ["player_id"]
             isOneToOne: false
             referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shortlist_players_shortlist_id_fkey"
+            columns: ["shortlist_id"]
+            isOneToOne: false
+            referencedRelation: "shortlists"
             referencedColumns: ["id"]
           },
         ]
@@ -327,6 +441,7 @@ export type Database = {
           id: string
           name: string
           owner: string | null
+          owner_id: string | null
           pool_id: string | null
           profile_id: string | null
           result_snapshot: Json | null
@@ -336,6 +451,7 @@ export type Database = {
           id?: string
           name: string
           owner?: string | null
+          owner_id?: string | null
           pool_id?: string | null
           profile_id?: string | null
           result_snapshot?: Json | null
@@ -345,6 +461,7 @@ export type Database = {
           id?: string
           name?: string
           owner?: string | null
+          owner_id?: string | null
           pool_id?: string | null
           profile_id?: string | null
           result_snapshot?: Json | null
@@ -365,6 +482,78 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      squad_players: {
+        Row: {
+          added_at: string
+          is_starter: boolean
+          player_id: string
+          slot: string | null
+          squad_id: string
+          squad_note: string | null
+        }
+        Insert: {
+          added_at?: string
+          is_starter?: boolean
+          player_id: string
+          slot?: string | null
+          squad_id: string
+          squad_note?: string | null
+        }
+        Update: {
+          added_at?: string
+          is_starter?: boolean
+          player_id?: string
+          slot?: string | null
+          squad_id?: string
+          squad_note?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "squad_players_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "squad_players_squad_id_fkey"
+            columns: ["squad_id"]
+            isOneToOne: false
+            referencedRelation: "squads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      squads: {
+        Row: {
+          created_at: string
+          formation: string
+          id: string
+          name: string
+          notes: string | null
+          owner_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          formation?: string
+          id?: string
+          name: string
+          notes?: string | null
+          owner_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          formation?: string
+          id?: string
+          name?: string
+          notes?: string | null
+          owner_id?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
     }
     Views: {
@@ -390,12 +579,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -419,11 +608,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -444,11 +633,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -469,11 +658,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -486,11 +675,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

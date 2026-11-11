@@ -28,23 +28,36 @@ export async function GET(req: NextRequest) {
 
   if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 });
 
-  // 2. Equipas (combinações distintas current_team + pool_id)
-  const { data: teamRows, error: tErr } = await supabase
-    .from('players')
-    .select('current_team, pool_id')
-    .ilike('current_team', `%${q}%`)
-    .not('current_team', 'is', null)
-    .limit(200); // lemos um pouco mais para depois deduplicar
+  // 2. Equipas (combinações distintas equipa + pool_id).
+  //    A equipa é o `team_in_period` — o clube por quem o jogador alinhou naquela
+  //    competição — com recurso ao `current_team` quando o export não o trouxe.
+  //    Procurar só pelo `current_team` devolvia clubes que nem sequer disputam a
+  //    prova, e falhava clubes cujos jogadores estão todos emprestados de fora.
+  const [periodRows, legacyRows] = await Promise.all([
+    supabase
+      .from('players')
+      .select('team_in_period, current_team, pool_id')
+      .ilike('team_in_period', `%${q}%`)
+      .limit(200),
+    supabase
+      .from('players')
+      .select('team_in_period, current_team, pool_id')
+      .is('team_in_period', null)
+      .ilike('current_team', `%${q}%`)
+      .limit(200),
+  ]);
 
+  const tErr = periodRows.error ?? legacyRows.error;
   if (tErr) return NextResponse.json({ error: tErr.message }, { status: 500 });
 
-  // Deduplicar pares (current_team, pool_id)
+  // Deduplicar pares (equipa, pool_id)
   const teamSet = new Map<string, { current_team: string; pool_id: string }>();
-  for (const row of teamRows ?? []) {
-    if (!row.current_team) continue;
-    const key = `${row.pool_id}::${row.current_team}`;
+  for (const row of [...(periodRows.data ?? []), ...(legacyRows.data ?? [])]) {
+    const team = (row.team_in_period ?? row.current_team ?? '').trim();
+    if (!team) continue;
+    const key = `${row.pool_id}::${team}`;
     if (!teamSet.has(key)) {
-      teamSet.set(key, { current_team: row.current_team, pool_id: row.pool_id });
+      teamSet.set(key, { current_team: team, pool_id: row.pool_id });
     }
   }
   const teamList = Array.from(teamSet.values()).slice(0, 10);

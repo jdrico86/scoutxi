@@ -60,19 +60,44 @@ export async function GET(req: NextRequest) {
   if (poolErr) return NextResponse.json({ error: poolErr.message }, { status: 500 });
   if (!pool) return NextResponse.json({ error: 'Pool não encontrada.' }, { status: 404 });
 
-  // 2. Jogadores do clube no pool, com filtros
-  let query = supabase
+  // 2. Jogadores do clube no pool, com filtros.
+  //    A equipa é o `team_in_period` — o clube por quem o jogador alinhou NAQUELA
+  //    competição. O `current_team` é onde está inscrito, que para emprestados é
+  //    outro clube: filtrar por ele deixava de fora os emprestados que jogam cá e
+  //    trazia jogadores que já não jogam. Só se recorre ao `current_team` quando o
+  //    export não trouxe clube do período.
+  //    São duas queries em vez de um `.or()` porque nomes de clubes com vírgulas
+  //    ou parênteses partem a sintaxe de filtros do PostgREST.
+  const SELECT_COLS =
+    'id, name, position_primary, age, minutes_played, games_played, height_cm, foot, contract_until, market_value_eur';
+
+  let periodQuery = supabase
     .from('players')
-    .select('id, name, position_primary, age, minutes_played, games_played, height_cm, foot, contract_until, market_value_eur')
+    .select(SELECT_COLS)
     .eq('pool_id', poolId)
+    .eq('team_in_period', teamName);
+  if (minAge != null) periodQuery = periodQuery.gte('age', minAge);
+  if (maxAge != null) periodQuery = periodQuery.lte('age', maxAge);
+  if (minMinutes != null) periodQuery = periodQuery.gte('minutes_played', minMinutes);
+
+  let legacyQuery = supabase
+    .from('players')
+    .select(SELECT_COLS)
+    .eq('pool_id', poolId)
+    .is('team_in_period', null)
     .eq('current_team', teamName);
+  if (minAge != null) legacyQuery = legacyQuery.gte('age', minAge);
+  if (maxAge != null) legacyQuery = legacyQuery.lte('age', maxAge);
+  if (minMinutes != null) legacyQuery = legacyQuery.gte('minutes_played', minMinutes);
 
-  if (minAge != null) query = query.gte('age', minAge);
-  if (maxAge != null) query = query.lte('age', maxAge);
-  if (minMinutes != null) query = query.gte('minutes_played', minMinutes);
+  const [periodRes, legacyRes] = await Promise.all([periodQuery, legacyQuery]);
 
-  const { data: teamPlayers, error: tpErr } = await query;
+  const tpErr = periodRes.error ?? legacyRes.error;
   if (tpErr) return NextResponse.json({ error: tpErr.message }, { status: 500 });
+
+  const byId = new Map<string, NonNullable<typeof periodRes.data>[number]>();
+  for (const p of [...(periodRes.data ?? []), ...(legacyRes.data ?? [])]) byId.set(p.id, p);
+  const teamPlayers = Array.from(byId.values());
 
   // 3. Perfis (todos)
   const { data: allProfiles } = await supabase

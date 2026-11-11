@@ -12,8 +12,15 @@ import type { PlayerInput, StatInput } from './scorer';
 
 type ProfileRow = Database['public']['Tables']['scouting_profiles']['Row'];
 
+/**
+ * Só os campos que a conversão lê. Exigir a linha inteira obrigava cada
+ * `.select()` a trazer colunas que não usa — e partia o build sempre que uma
+ * coluna nova aparecia no esquema (foi o caso do `owner_id`).
+ */
+type ProfileRowFields = Pick<ProfileRow, 'name' | 'description' | 'filters' | 'weights'>;
+
 /** Converte linha da BD para ScoutingProfile, com validação mínima. */
-export function profileRowToProfile(row: ProfileRow): ScoutingProfile {
+export function profileRowToProfile(row: ProfileRowFields): ScoutingProfile {
   const filters = (row.filters ?? {}) as ScoutingProfile['filters'];
   // weights foi guardado como { entries, peer_group_positions } — ler assim
   const weightsObj = (row.weights ?? { entries: [], peer_group_positions: [] }) as {

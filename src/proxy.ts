@@ -14,6 +14,17 @@ import { NextRequest, NextResponse } from 'next/server';
  * Tudo o resto exige sessão válida.
  */
 export async function proxy(request: NextRequest) {
+  // O /auth/callback tem de chegar ao route handler com os cookies intactos.
+  // Correr getUser() aqui, numa request que ainda não tem sessão, faz o cliente
+  // Supabase reescrever os cookies de auth — e leva à frente o
+  // `sb-<ref>-auth-token-code-verifier` que o PKCE guardou quando o magic link
+  // foi pedido. O exchangeCodeForSession a seguir falha com
+  // "PKCE code verifier not found in storage".
+  // Tratar a rota como pública não chega: é preciso sair ANTES de criar o cliente.
+  if (request.nextUrl.pathname.startsWith('/auth/callback')) {
+    return NextResponse.next({ request: { headers: request.headers } });
+  }
+
   let response = NextResponse.next({
     request: { headers: request.headers },
   });

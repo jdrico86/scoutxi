@@ -7,17 +7,16 @@ export const runtime = 'nodejs';
 type Params = { params: Promise<{ id: string }> };
 
 // GET /api/pools/[id]/teams
-// Devolve { teams: [...] } com nomes únicos de current_team naquele pool, ordenados.
+// Devolve { teams: [...] } com os clubes daquele pool, ordenados.
 //
-// Filtro de ruído: as competições têm tipicamente 16-22 clubes com planteis de
-// 15-25 jogadores cada. Mas o `current_team` é o clube atual dos jogadores, não
-// o clube em que jogaram nessa competição — por isso aparecem "intrusos" (jogadores
-// que entretanto subiram, desceram ou foram para sub-19/estrangeiro).
+// A equipa de um jogador é o `team_in_period` — o clube por quem jogou NAQUELA
+// competição. O `current_team` é onde está inscrito, que para emprestados é
+// outro clube; usá-lo inflacionava a lista (40 clubes numa Liga 2 de 18) e
+// atribuía jogadores ao clube errado.
 //
-// Heurística: ordenar clubes por contagem de jogadores, pegar nos top 20 (proxy
-// para "núcleo" do pool), calcular a mediana desses, e exigir pelo menos 50% dela.
-// Funciona em CP, Liga 3 e Sub-23 onde as equipas reais ficam todas no top-N
-// e os intrusos ficam todos com contagens baixas.
+// Até 11/11/2026 esta rota contava por `current_team` e escondia os intrusos
+// com uma heurística de mediana. Com a coluna certa a heurística é desnecessária:
+// as contagens dão exactamente o número de clubes da prova.
 export async function GET(_: NextRequest, { params }: Params) {
   const { id } = await params;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -34,40 +33,22 @@ export async function GET(_: NextRequest, { params }: Params) {
   while (true) {
     const { data: page, error } = await supabase
       .from('players')
-      .select('current_team')
+      .select('team_in_period, current_team')
       .eq('pool_id', id)
-      .not('current_team', 'is', null)
       .range(from, from + PAGE - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (!page || page.length === 0) break;
     for (const row of page) {
-      if (!row.current_team) continue;
-      counts.set(row.current_team, (counts.get(row.current_team) ?? 0) + 1);
+      // Recurso ao current_team só quando o export não trouxe o clube do período.
+      const team = (row.team_in_period ?? row.current_team ?? '').trim();
+      if (!team) continue;
+      counts.set(team, (counts.get(team) ?? 0) + 1);
     }
     if (page.length < PAGE) break;
     from += PAGE;
   }
 
-  // Ordenar contagens descendente, pegar nos top 20
-  const sortedCounts = Array.from(counts.values()).sort((a, b) => b - a);
-  const topN = sortedCounts.slice(0, 20);
+  const teams = Array.from(counts.keys()).sort((a, b) => a.localeCompare(b, 'pt'));
 
-  // Mediana do top-20
-  let median = 0;
-  if (topN.length > 0) {
-    const sortedAsc = [...topN].sort((a, b) => a - b);
-    const mid = Math.floor(sortedAsc.length / 2);
-    median = sortedAsc.length % 2 === 0
-      ? (sortedAsc[mid - 1] + sortedAsc[mid]) / 2
-      : sortedAsc[mid];
-  }
-  const threshold = Math.max(1, Math.floor(median * 0.5));
-
-  // Filtrar
-  const teams = Array.from(counts.entries())
-    .filter(([, n]) => n >= threshold)
-    .map(([name]) => name)
-    .sort();
-
-  return NextResponse.json({ teams, threshold, median });
+  return NextResponse.json({ teams, counts: Object.fromEntries(counts) });
 }

@@ -4,6 +4,7 @@ import { loadPoolData, profileRowToProfile } from '@/lib/scouting/db-helpers';
 import { scoreProfile } from '@/lib/scouting/scorer';
 import { getAuthUser } from '@/lib/supabase/server';
 import { matchesPositions, playerPositions } from '@/lib/scouting/positions';
+import { recalculateProfileScores } from '@/lib/scouting/recalculate-scores';
 
 type ProfileFilters = {
   positions?: string[];
@@ -148,34 +149,69 @@ export async function GET(_: NextRequest, { params }: Params) {
   }> = [];
 
   if (pool && applicableProfiles.length > 0) {
-    const { players: poolPlayers, stats: poolStats, directions } = await loadPoolData(supabase, pool.id);
+    // Scores lidos de profile_scores em vez de recalcular a pool inteira — ver
+    // lib/scouting/recalculate-scores.ts. Só se recorre ao cálculo ao vivo para
+    // os perfis que ainda não estejam em cache nesta pool.
+    const applicableIds = applicableProfiles.map((p) => p.id);
+
+    const { data: cachedHeads } = await supabase
+      .from('profile_scores')
+      .select('profile_id, total_eligible')
+      .eq('pool_id', pool.id)
+      .eq('rank', 1)
+      .in('profile_id', applicableIds);
+    const totalByProfile = new Map<string, number>();
+    for (const row of cachedHeads ?? []) totalByProfile.set(row.profile_id, row.total_eligible);
+
+    const { data: mine } = await supabase
+      .from('profile_scores')
+      .select('profile_id, score, rank')
+      .eq('pool_id', pool.id)
+      .eq('player_id', id);
+    const mineByProfile = new Map<string, { score: number; rank: number }>();
+    for (const row of mine ?? []) {
+      mineByProfile.set(row.profile_id, { score: Number(row.score), rank: row.rank });
+    }
+
+    const missing = applicableProfiles.filter((p) => !totalByProfile.has(p.id));
+    if (missing.length > 0) {
+      const { players: poolPlayers, stats: poolStats, directions } = await loadPoolData(supabase, pool.id);
+      for (const profileRow of missing) {
+        const result = scoreProfile({
+          pool_id: pool.id,
+          profile: profileRowToProfile(profileRow),
+          players: poolPlayers,
+          stats: poolStats,
+          metric_directions: directions,
+        });
+        totalByProfile.set(profileRow.id, result.ranked.length);
+        const idx = result.ranked.findIndex((p) => p.player_id === id);
+        if (idx >= 0) {
+          mineByProfile.set(profileRow.id, { score: result.ranked[idx].score, rank: idx + 1 });
+        }
+      }
+      recalculateProfileScores(supabase, pool.id, { profileIds: missing.map((m) => m.id) }).catch(
+        (err) => console.error('[players] falha a gravar profile_scores:', (err as Error).message)
+      );
+    }
 
     for (const profileRow of applicableProfiles) {
-      const profile = profileRowToProfile(profileRow);
-      const result = scoreProfile({
-        pool_id: pool.id,
-        profile,
-        players: poolPlayers,
-        stats: poolStats,
-        metric_directions: directions,
-      });
-
-      const found = result.ranked.find((p) => p.player_id === id);
       const tags = (profileRow.tags ?? []) as string[];
       const isSeed = tags.includes('seed');
+      const found = mineByProfile.get(profileRow.id);
+      const total = totalByProfile.get(profileRow.id) ?? 0;
 
       if (found) {
-        const rank = result.ranked.indexOf(found) + 1;
         poolScores.push({
           profile_id: profileRow.id,
           profile_name: profileRow.name,
           profile_description: profileRow.description,
           is_seed: isSeed,
           score: found.score,
-          rank,
+          rank: found.rank,
           eligible: true,
           eligibility_reason: null,
-          total_eligible: result.ranked.length,
+          total_eligible: total,
         });
       } else {
         const reason = getEligibilityReason(player, profileRow.filters as ProfileFilters | null);
@@ -188,7 +224,7 @@ export async function GET(_: NextRequest, { params }: Params) {
           rank: null,
           eligible: false,
           eligibility_reason: reason,
-          total_eligible: result.ranked.length,
+          total_eligible: total,
         });
       }
     }

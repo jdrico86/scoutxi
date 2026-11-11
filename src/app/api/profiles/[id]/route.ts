@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getAuthUser } from '@/lib/supabase/server';
+import { invalidateProfileScores } from '@/lib/scouting/recalculate-scores';
 
 export const runtime = 'nodejs';
 
@@ -131,6 +132,14 @@ export async function PUT(req: NextRequest, { params }: Params) {
     .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Perfil não encontrado.' }, { status: 404 });
+
+  // Os scores guardados deste perfil ficaram desactualizados: apagá-los é mais
+  // barato do que recalculá-los aqui, e as rotas de leitura recalculam-no ao
+  // vivo — um perfil só — na primeira visita a seguir, voltando a gravar.
+  await invalidateProfileScores(supabase, id).catch((err) =>
+    console.error('[profiles] falha a invalidar profile_scores:', (err as Error).message)
+  );
+
   return NextResponse.json({ ok: true, profile: data });
 }
 

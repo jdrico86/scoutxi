@@ -354,6 +354,58 @@ export type Database = {
         }
         Relationships: []
       }
+      profile_scores: {
+        Row: {
+          computed_at: string
+          player_id: string
+          pool_id: string
+          profile_id: string
+          rank: number
+          score: number
+          total_eligible: number
+        }
+        Insert: {
+          computed_at?: string
+          player_id: string
+          pool_id: string
+          profile_id: string
+          rank: number
+          score: number
+          total_eligible: number
+        }
+        Update: {
+          computed_at?: string
+          player_id?: string
+          pool_id?: string
+          profile_id?: string
+          rank?: number
+          score?: number
+          total_eligible?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_scores_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profile_scores_pool_id_fkey"
+            columns: ["pool_id"]
+            isOneToOne: false
+            referencedRelation: "pools"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profile_scores_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "scouting_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scouting_profiles: {
         Row: {
           created_at: string | null

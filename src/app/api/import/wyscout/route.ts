@@ -4,6 +4,7 @@ import { parseWyscoutXlsx } from '@/lib/wyscout/parser';
 import type { Database } from '@/lib/supabase/database.types';
 import { getAuthUser } from '@/lib/supabase/server';
 import { recalculatePoolPercentiles } from '@/lib/similarity/recalculate';
+import { recalculateProfileScores } from '@/lib/scouting/recalculate-scores';
 
 // Runtime Node (não Edge) — precisamos de Buffer e xlsx lê melhor em Node
 export const runtime = 'nodejs';
@@ -26,7 +27,7 @@ const BATCH_STATS = 1000;
  *   competition: string          (opcional)
  *   source:      string          (opcional, default "wyscout")
  *
- * Comportamento: upsert por (pool_id, name, current_team, height_cm, foot).
+ * Comportamento: upsert por (pool_id, name, current_team).
  *   - Re-importar o mesmo pool: apaga stats antigas dos jogadores re-encontrados
  *     e recria, mantém metadados actualizados.
  */
@@ -133,25 +134,8 @@ export async function POST(req: NextRequest) {
   //    Paginado para evitar o limite implícito de 1000 do PostgREST — em pools
   //    grandes (CdP) o dedupe falhava silenciosamente e jogadores eram
   //    re-inseridos como duplicados em vez de actualizados.
-  //    A chave NÃO pode incluir a idade: o Wyscout escreve-a à data do export,
-  //    por isso quem faz anos entre importações deixava de bater certo e era
-  //    re-inserido como jogador novo. Foi a causa dos 202 órfãos em CP 25/26 e
-  //    de 142 duplicados em CP 26/27 na J8. Altura e pé não mudam entre exports;
-  //    sobre os 158 pares duplicados da J8, 154 tinham altura e pé iguais.
-  const keyOf = (
-    name: string,
-    team: string | null | undefined,
-    height: number | null | undefined,
-    foot: string | null | undefined
-  ) => {
-    const h =
-      height === null || height === undefined || Number.isNaN(Number(height))
-        ? ''
-        : String(Math.round(Number(height)));
-    return `${name.trim().toLowerCase()}::${(team ?? '').trim().toLowerCase()}::${h}::${(foot ?? '')
-      .trim()
-      .toLowerCase()}`;
-  };
+  const keyOf = (name: string, team: string | null | undefined, age: number | null | undefined) =>
+    `${name.toLowerCase()}::${(team ?? '').toLowerCase()}::${age ?? ''}`;
 
   const existingByKey = new Map<string, string>(); // key -> player_id
   const EXISTING_PAGE = 1000;
@@ -159,7 +143,7 @@ export async function POST(req: NextRequest) {
   while (true) {
     const { data: page, error: existingErr } = await supabase
       .from('players')
-      .select('id, name, current_team, height_cm, foot')
+      .select('id, name, current_team, age')
       .eq('pool_id', poolId)
       .range(existingFrom, existingFrom + EXISTING_PAGE - 1);
     if (existingErr) {
@@ -170,7 +154,7 @@ export async function POST(req: NextRequest) {
     }
     if (!page || page.length === 0) break;
     for (const p of page) {
-      existingByKey.set(keyOf(p.name, p.current_team, p.height_cm, p.foot), p.id);
+      existingByKey.set(keyOf(p.name, p.current_team, p.age), p.id);
     }
     if (page.length < EXISTING_PAGE) break;
     existingFrom += EXISTING_PAGE;
@@ -185,9 +169,8 @@ export async function POST(req: NextRequest) {
   for (const p of parsed.players) {
     const name = String(p.data.name);
     const team = (p.data.current_team as string | null | undefined) ?? null;
-    const height = (p.data.height_cm as number | null | undefined) ?? null;
-    const foot = (p.data.foot as string | null | undefined) ?? null;
-    const key = keyOf(name, team, height, foot);
+    const age = (p.data.age as number | null | undefined) ?? null;
+    const key = keyOf(name, team, age);
     const existingId = existingByKey.get(key);
 
     if (existingId) {
@@ -202,15 +185,12 @@ export async function POST(req: NextRequest) {
   let insertedCount = 0;
   for (let i = 0; i < toInsert.length; i += BATCH_PLAYERS) {
     const batch = toInsert.slice(i, i + BATCH_PLAYERS);
-    const { data, error } = await supabase
-      .from('players')
-      .insert(batch)
-      .select('id, name, current_team, height_cm, foot');
+    const { data, error } = await supabase.from('players').insert(batch).select('id, name, current_team, age');
     if (error) {
       return NextResponse.json({ error: `Erro a inserir jogadores: ${error.message}` }, { status: 500 });
     }
     for (const p of data ?? []) {
-      existingByKey.set(keyOf(p.name, p.current_team, p.height_cm, p.foot), p.id);
+      existingByKey.set(keyOf(p.name, p.current_team, p.age), p.id);
     }
     insertedCount += data?.length ?? 0;
   }
@@ -218,14 +198,7 @@ export async function POST(req: NextRequest) {
   // Agora que todos os IDs existem, preenchemos rowToPlayerId também para os novos
   for (const p of parsed.players) {
     if (rowToPlayerId.has(p.rowIndex)) continue;
-    const id = existingByKey.get(
-      keyOf(
-        String(p.data.name),
-        (p.data.current_team as string | null) ?? null,
-        (p.data.height_cm as number | null) ?? null,
-        (p.data.foot as string | null) ?? null
-      )
-    );
+    const id = existingByKey.get(keyOf(String(p.data.name), (p.data.current_team as string | null) ?? null, (p.data.age as number | null) ?? null));
     if (id) rowToPlayerId.set(p.rowIndex, id);
   }
 
@@ -286,6 +259,19 @@ export async function POST(req: NextRequest) {
     percentilesResult = { ok: false, error: (err as Error).message };
   }
 
+  // 8) Recalcular profile_scores pela mesma razão e com as mesmas regras.
+  //    Os scores dos perfis só mudam quando a pool muda, por isso ficam
+  //    gravados em vez de serem recalculados a cada visita às páginas de equipa
+  //    e de jogador. Erro aqui não falha o import: as rotas de leitura sabem
+  //    calcular ao vivo o que não encontrarem em cache.
+  let scoresResult: { ok: boolean; rows_inserted?: number; profiles?: number; error?: string };
+  try {
+    const r = await recalculateProfileScores(supabase, poolId);
+    scoresResult = { ok: true, rows_inserted: r.rows_inserted, profiles: r.profiles_processed };
+  } catch (err) {
+    scoresResult = { ok: false, error: (err as Error).message };
+  }
+
   return NextResponse.json({
     ok: true,
     pool_id: poolId,
@@ -301,5 +287,6 @@ export async function POST(req: NextRequest) {
     columns_missing: parsed.missingColumns,
     warnings: parsed.warnings,
     percentiles: percentilesResult,
+    profile_scores: scoresResult,
   });
 }

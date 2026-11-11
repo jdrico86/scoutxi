@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/database.types';
 import { loadPoolData, profileRowToProfile } from '@/lib/scouting/db-helpers';
 import { matchesPositions } from '@/lib/scouting/positions';
+import { recalculateProfileScores } from '@/lib/scouting/recalculate-scores';
 import { scoreProfile } from '@/lib/scouting/scorer';
 
 export const runtime = 'nodejs';
@@ -106,32 +107,89 @@ export async function GET(req: NextRequest) {
     .select('*')
     .order('name');
 
-  // 4. Pré-carregar pool data + correr todos os perfis UMA vez
-  const { players: poolPlayers, stats: poolStats, directions } = await loadPoolData(supabase, poolId);
+  // 4. Scores — lidos de profile_scores, não recalculados.
+  //
+  //    Antes, esta rota carregava a pool inteira (1261 jogadores, 46 612 stats,
+  //    47 pedidos paginados) e corria os 28 perfis sobre toda a gente para
+  //    descobrir a posição de 20 jogadores. Perto de dez segundos, e no limite
+  //    dos 10s das funções Netlify. Os scores só mudam no import ou quando um
+  //    perfil é editado, por isso vêm agora pré-calculados.
+  const profileResults = new Map<
+    string,
+    { rankByPlayer: Map<string, { score: number; rank: number }>; total: number; name: string; isSeed: boolean }
+  >();
+  const metaOf = (profileRow: { id: string; name: string; tags: unknown }) => ({
+    name: profileRow.name,
+    isSeed: ((profileRow.tags ?? []) as string[]).includes('seed'),
+  });
 
-  // Mapa perfil_id → resultado (rank por player_id, total_eligible)
-  const profileResults = new Map<string, { rankByPlayer: Map<string, { score: number; rank: number }>; total: number; name: string; isSeed: boolean }>();
+  const teamPlayerIds = teamPlayers.map((p) => p.id);
 
-  for (const profileRow of allProfiles ?? []) {
-    const profile = profileRowToProfile(profileRow);
-    const result = scoreProfile({
-      pool_id: poolId,
-      profile,
-      players: poolPlayers,
-      stats: poolStats,
-      metric_directions: directions,
-    });
-    const rankByPlayer = new Map<string, { score: number; rank: number }>();
-    result.ranked.forEach((r, idx) => {
-      rankByPlayer.set(r.player_id, { score: r.score, rank: idx + 1 });
-    });
-    const tags = (profileRow.tags ?? []) as string[];
-    profileResults.set(profileRow.id, {
-      rankByPlayer,
-      total: result.ranked.length,
-      name: profileRow.name,
-      isSeed: tags.includes('seed'),
-    });
+  // 4a. Que perfis já estão em cache nesta pool, e com que total de elegíveis.
+  //     Uma linha por perfil (a do primeiro classificado) chega para saber as
+  //     duas coisas — são 28 linhas, não 35 mil.
+  const { data: cachedHeads, error: headsErr } = await supabase
+    .from('profile_scores')
+    .select('profile_id, total_eligible')
+    .eq('pool_id', poolId)
+    .eq('rank', 1);
+  if (headsErr) return NextResponse.json({ error: headsErr.message }, { status: 500 });
+
+  const totalByProfile = new Map<string, number>();
+  for (const row of cachedHeads ?? []) totalByProfile.set(row.profile_id, row.total_eligible);
+
+  // 4b. Scores dos jogadores desta equipa — só deles.
+  if (teamPlayerIds.length > 0 && totalByProfile.size > 0) {
+    const { data: scoreRows, error: scoresErr } = await supabase
+      .from('profile_scores')
+      .select('profile_id, player_id, score, rank')
+      .eq('pool_id', poolId)
+      .in('player_id', teamPlayerIds);
+    if (scoresErr) return NextResponse.json({ error: scoresErr.message }, { status: 500 });
+
+    for (const row of scoreRows ?? []) {
+      let entry = profileResults.get(row.profile_id);
+      if (!entry) {
+        const profileRow = (allProfiles ?? []).find((pr) => pr.id === row.profile_id);
+        if (!profileRow) continue;
+        entry = {
+          rankByPlayer: new Map(),
+          total: totalByProfile.get(row.profile_id) ?? 0,
+          ...metaOf(profileRow),
+        };
+        profileResults.set(row.profile_id, entry);
+      }
+      entry.rankByPlayer.set(row.player_id, { score: Number(row.score), rank: row.rank });
+    }
+  }
+
+  // 4c. Perfis ainda sem cache nesta pool (perfil novo ou acabado de editar):
+  //     calcula-os ao vivo — só esses — e grava para a visita seguinte ser rápida.
+  const missing = (allProfiles ?? []).filter((pr) => !totalByProfile.has(pr.id));
+  if (missing.length > 0) {
+    const { players: poolPlayers, stats: poolStats, directions } = await loadPoolData(supabase, poolId);
+    for (const profileRow of missing) {
+      const result = scoreProfile({
+        pool_id: poolId,
+        profile: profileRowToProfile(profileRow),
+        players: poolPlayers,
+        stats: poolStats,
+        metric_directions: directions,
+      });
+      const rankByPlayer = new Map<string, { score: number; rank: number }>();
+      result.ranked.forEach((r, idx) => {
+        rankByPlayer.set(r.player_id, { score: r.score, rank: idx + 1 });
+      });
+      profileResults.set(profileRow.id, {
+        rankByPlayer,
+        total: result.ranked.length,
+        ...metaOf(profileRow),
+      });
+    }
+    // Gravar em segundo plano; se falhar, a página responde na mesma.
+    recalculateProfileScores(supabase, poolId, { profileIds: missing.map((m) => m.id) }).catch(
+      (err) => console.error('[teams] falha a gravar profile_scores:', (err as Error).message)
+    );
   }
 
   // 5. Para cada jogador da equipa, recolher scores em todos os perfis em que é elegível

@@ -26,6 +26,7 @@
 
 import { computePercentile } from '@/lib/scouting/percentile';
 import type { PlayerInput, StatInput } from '@/lib/scouting/scorer';
+import { matchesPositions, matchesPrimaryPosition } from '@/lib/scouting/positions';
 
 export type ScoutGeneralFilters = {
   min_age?: number;
@@ -137,9 +138,8 @@ export function runScoutQuery(args: {
   const gf = query.general_filters ?? {};
   const eligible: PlayerInput[] = [];
   for (const p of players) {
-    if (positions.length > 0) {
-      if (!p.position_primary || !positions.includes(p.position_primary)) continue;
-    }
+    // Conta a posição primária e as secundárias — ver lib/scouting/positions.ts
+    if (!matchesPositions(p, positions)) continue;
     if (gf.min_minutes != null && (p.minutes_played ?? 0) < gf.min_minutes) continue;
     if (gf.min_age != null && (p.age ?? 0) < gf.min_age) continue;
     if (gf.max_age != null && (p.age ?? 999) > gf.max_age) continue;
@@ -149,9 +149,10 @@ export function runScoutQuery(args: {
 
   // ── Peer group ─────────────────────────────────────────────────────
   // Sem posições: peer group = pool inteira (com warning).
+  // Peer group por posição PRIMÁRIA — ver lib/scouting/positions.ts
   const peerGroup: PlayerInput[] =
     positions.length > 0
-      ? players.filter((p) => p.position_primary && positions.includes(p.position_primary))
+      ? players.filter((p) => matchesPrimaryPosition(p, positions))
       : players;
 
   if (positions.length === 0) {

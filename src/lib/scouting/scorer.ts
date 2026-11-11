@@ -17,6 +17,7 @@
 
 import type { ScoredPlayer, ScoringResult, ScoutingProfile } from './profile-types';
 import { computePercentile } from './percentile';
+import { matchesPositions, matchesPrimaryPosition } from './positions';
 
 /** Input mínimo de jogador para o scorer. */
 export type PlayerInput = {
@@ -24,6 +25,7 @@ export type PlayerInput = {
   name: string;
   current_team: string | null;
   position_primary: string | null;
+  positions_secondary?: string[] | null;
   age: number | null;
   minutes_played: number | null;
   contract_until: string | null;
@@ -69,9 +71,8 @@ export function scoreProfile(args: {
   const eligible: PlayerInput[] = [];
   const filters = profile.filters;
   for (const p of players) {
-    if (filters.positions && filters.positions.length > 0) {
-      if (!p.position_primary || !filters.positions.includes(p.position_primary)) continue;
-    }
+    // Conta a posição primária e as secundárias — ver lib/scouting/positions.ts
+    if (!matchesPositions(p, filters.positions)) continue;
     if (filters.min_minutes != null && (p.minutes_played ?? 0) < filters.min_minutes) continue;
     if (filters.min_age != null && (p.age ?? 0) < filters.min_age) continue;
     if (filters.max_age != null && (p.age ?? 999) > filters.max_age) continue;
@@ -84,9 +85,12 @@ export function scoreProfile(args: {
 
   // ── Definir peer_group (amostra para percentis) ────────────────────────
   const peerPositions = profile.peer_group_positions ?? profile.filters.positions ?? [];
+  // Peer group por posição PRIMÁRIA — a régua tem de ficar estreita mesmo com
+  // a elegibilidade larga, senão os percentis sobem por diluição.
+  // Ver lib/scouting/positions.ts
   const peerGroup: PlayerInput[] =
     peerPositions.length > 0
-      ? players.filter((p) => p.position_primary && peerPositions.includes(p.position_primary))
+      ? players.filter((p) => matchesPrimaryPosition(p, peerPositions))
       : players;
 
   if (peerGroup.length < 10) {

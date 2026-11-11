@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/database.types';
 import { loadPoolData, profileRowToProfile } from '@/lib/scouting/db-helpers';
+import { matchesPositions } from '@/lib/scouting/positions';
 import { scoreProfile } from '@/lib/scouting/scorer';
 
 export const runtime = 'nodejs';
@@ -69,7 +70,7 @@ export async function GET(req: NextRequest) {
   //    São duas queries em vez de um `.or()` porque nomes de clubes com vírgulas
   //    ou parênteses partem a sintaxe de filtros do PostgREST.
   const SELECT_COLS =
-    'id, name, position_primary, age, minutes_played, games_played, height_cm, foot, contract_until, market_value_eur';
+    'id, name, position_primary, positions_secondary, age, minutes_played, games_played, height_cm, foot, contract_until, market_value_eur';
 
   let periodQuery = supabase
     .from('players')
@@ -135,14 +136,14 @@ export async function GET(req: NextRequest) {
 
   // 5. Para cada jogador da equipa, recolher scores em todos os perfis em que é elegível
   const enriched: TeamPlayer[] = (teamPlayers ?? []).map((p) => {
-    const playerPos = p.position_primary;
     const profilesForPlayer: ProfileScoreEntry[] = [];
 
     for (const profileRow of allProfiles ?? []) {
-      // Verificar se o perfil aceita esta posição
+      // O perfil aceita o jogador se aceitar qualquer uma das posições dele,
+      // primária ou secundária — ver lib/scouting/positions.ts
       const filters = profileRow.filters as { positions?: string[] } | null;
       const positions = filters?.positions ?? [];
-      if (!playerPos || !positions.includes(playerPos)) continue;
+      if (positions.length === 0 || !matchesPositions(p, positions)) continue;
 
       const profileResult = profileResults.get(profileRow.id);
       if (!profileResult) continue;

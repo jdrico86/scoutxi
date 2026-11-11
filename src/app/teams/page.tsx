@@ -363,11 +363,22 @@ function TeamsContent() {
 }
 
 function PlayerCard({ player, onClick }: { player: TeamPlayer; onClick: () => void }) {
+  // Div com role="button" em vez de <button>: o cartão contém a estrela de
+  // favorito, que é ela própria um <button>, e HTML não permite um botão dentro
+  // de outro — o React avisava com um erro de hidratação. O tabIndex e o
+  // onKeyDown mantêm o cartão acessível por teclado.
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
-      className="block w-full rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-400"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      className="block w-full cursor-pointer rounded-lg border border-neutral-200 bg-white p-4 text-left transition-colors hover:border-neutral-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400"
     >
       <div className="flex items-baseline justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
@@ -412,6 +423,6 @@ function PlayerCard({ player, onClick }: { player: TeamPlayer; onClick: () => vo
           ))}
         </ul>
       )}
-    </button>
+    </div>
   );
 }

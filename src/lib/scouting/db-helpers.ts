@@ -72,7 +72,7 @@ export async function loadPoolData(
     const { data: page, error: playersErr } = await supabase
       .from('players')
       .select(
-        'id, name, current_team, position_primary, age, minutes_played, contract_until, market_value_eur, on_loan'
+        'id, name, current_team, position_primary, positions_secondary, age, minutes_played, contract_until, market_value_eur, on_loan'
       )
       .eq('pool_id', poolId)
       .range(playersFrom, playersFrom + PLAYERS_PAGE - 1);

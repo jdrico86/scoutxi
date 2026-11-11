@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { loadPoolData, profileRowToProfile } from '@/lib/scouting/db-helpers';
 import { scoreProfile } from '@/lib/scouting/scorer';
 import { getAuthUser } from '@/lib/supabase/server';
+import { matchesPositions, playerPositions } from '@/lib/scouting/positions';
 
 type ProfileFilters = {
   positions?: string[];
@@ -12,13 +13,18 @@ type ProfileFilters = {
 };
 
 function getEligibilityReason(
-  player: { age: number | null; minutes_played: number | null; position_primary: string | null },
+  player: {
+    age: number | null;
+    minutes_played: number | null;
+    position_primary: string | null;
+    positions_secondary?: string[] | null;
+  },
   filters: ProfileFilters | null
 ): string | null {
   if (!filters) return null;
   const { min_age, max_age, min_minutes, positions } = filters;
-  if (positions && positions.length > 0 && player.position_primary && !positions.includes(player.position_primary)) {
-    return `posição ${player.position_primary} fora das aceites (${positions.join(', ')})`;
+  if (positions && positions.length > 0 && !matchesPositions(player, positions)) {
+    return `posições ${playerPositions(player).join('/') || '—'} fora das aceites (${positions.join(', ')})`;
   }
   if (max_age != null && player.age != null && player.age > max_age) {
     return `idade acima do limite (${player.age} vs ${max_age})`;
@@ -119,12 +125,13 @@ export async function GET(_: NextRequest, { params }: Params) {
     .select('*')
     .order('name');
 
-  const playerPos = player.position_primary;
+  // Um perfil é aplicável se aceitar QUALQUER posição do jogador, primária ou
+  // secundária — ver lib/scouting/positions.ts
   const applicableProfiles = (allProfiles ?? []).filter((row) => {
-    if (!playerPos) return false;
     const filters = row.filters as { positions?: string[] } | null;
     const positions = filters?.positions ?? [];
-    return positions.includes(playerPos);
+    if (positions.length === 0) return false;
+    return matchesPositions(player, positions);
   });
 
   // 7. Calcular scores

@@ -26,6 +26,7 @@ type PoolDataPlayer = {
   current_team: string | null;
   team_in_period: string | null;
   position_primary: string | null;
+  positions_secondary: string[] | null;
   age: number | null;
   minutes_played: number | null;
   on_loan: boolean | null;
@@ -89,7 +90,7 @@ export async function GET(req: NextRequest) {
   while (true) {
     const { data: page, error } = await supabase
       .from('players')
-      .select('id, name, current_team, team_in_period, position_primary, age, minutes_played, on_loan, contract_until, market_value_eur')
+      .select('id, name, current_team, team_in_period, position_primary, positions_secondary, age, minutes_played, on_loan, contract_until, market_value_eur')
       .eq('pool_id', poolId)
       .range(from, from + PAGE - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

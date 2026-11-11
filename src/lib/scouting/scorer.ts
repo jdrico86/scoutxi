@@ -33,6 +33,20 @@ export type PlayerInput = {
   on_loan: boolean | null;
 };
 
+/**
+ * Posições do peer group de um perfil: as `peer_group_positions` quando
+ * existem e não estão vazias, senão as posições do filtro. Lista vazia no fim
+ * significa mesmo "sem grupo", e aí o peer group é a pool toda.
+ *
+ * Exportada porque o `/api/score` precisa da mesma resposta para saber que
+ * jogadores carregar sem ter de ler a pool inteira.
+ */
+export function resolvePeerPositions(profile: ScoutingProfile): string[] {
+  const peer = profile.peer_group_positions;
+  if (peer && peer.length > 0) return peer;
+  return profile.filters.positions ?? [];
+}
+
 /** Input mínimo de stat. */
 export type StatInput = {
   player_id: string;
@@ -84,7 +98,11 @@ export function scoreProfile(args: {
   }
 
   // ── Definir peer_group (amostra para percentis) ────────────────────────
-  const peerPositions = profile.peer_group_positions ?? profile.filters.positions ?? [];
+  // `??` não chega: muitos perfis têm `peer_group_positions: []` gravado, e um
+  // array vazio passa pelo `??`. Com ele vazio, o peer group passava a ser a
+  // pool INTEIRA — um central comparado com guarda-redes incluídos. Afectava 13
+  // dos 28 perfis, entre eles todos os "Serpa". Corrigido a 12/11/2026.
+  const peerPositions = resolvePeerPositions(profile);
   // Peer group por posição PRIMÁRIA — a régua tem de ficar estreita mesmo com
   // a elegibilidade larga, senão os percentis sobem por diluição.
   // Ver lib/scouting/positions.ts

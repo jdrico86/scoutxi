@@ -229,7 +229,10 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
       body: JSON.stringify({
         pool_id: data.pool.id,
         profile_id: selectedProfileId,
-        limit: 500,
+        // Só este jogador: o endpoint carrega o peer group e as métricas do
+        // perfil, em vez da pool inteira.
+        player_id: id,
+        limit: 1,
       }),
     })
       .then((r) => r.json())

@@ -8,16 +8,18 @@
  *   é registado em `warnings`.
  *
  * Deduplicação:
- * - O Wyscout por vezes exporta linhas duplicadas para o mesmo jogador
- *   (mesmo nome + clube + idade) com dados ligeiramente diferentes —
- *   provavelmente um glitch do exporter. Antes de processar, deduplicamos
- *   por (name, current_team, age) ficando com a linha de mais minutos.
+ * - O Wyscout por vezes exporta linhas duplicadas para o mesmo jogador com
+ *   dados ligeiramente diferentes — provavelmente um glitch do exporter.
+ *   Antes de processar, deduplicamos por nome + equipa + altura + pé
+ *   (lib/wyscout/player-key.ts, a mesma chave da rota de import), ficando
+ *   com a linha de mais minutos. A idade não entra: muda entre exports.
  *   Casos como "Diogo Marques" no Lagoa vs FC Serpa (jogadores diferentes
  *   ou transferência) NÃO são afectados — clubes diferentes mantêm linhas
  *   separadas.
  */
 import * as XLSX from 'xlsx';
 import { METRIC_MAP, PLAYER_FIELD_MAP, toNumberOrNull } from './column-map';
+import { playerKey } from './player-key';
 
 export type ParsedPlayer = {
   // índice de linha no XLSX (1-based, excluindo header), útil para debug
@@ -44,7 +46,7 @@ export type ParseResult = {
   warnings: string[];
   unmappedColumns: string[]; // colunas que existiam no XLSX e que ignorámos
   missingColumns: string[]; // colunas que o parser espera e não encontrou
-  duplicatesRemoved: number; // linhas removidas por deduplicação (name+team+age)
+  duplicatesRemoved: number; // linhas removidas por deduplicação (nome+equipa+altura+pé)
 };
 
 /** Lê buffer de ficheiro XLSX e devolve estruturas prontas para persistência. */
@@ -91,7 +93,7 @@ export function parseWyscoutXlsx(buffer: ArrayBuffer | Buffer): ParseResult {
   const unmappedColumns = [...presentColumns].filter((c) => !expectedColumns.has(c));
 
   // ── Deduplicação ─────────────────────────────────────────────────────
-  // Agrupa linhas por (name, team, age) e fica com a linha de mais minutos.
+  // Agrupa linhas por (nome, equipa, altura, pé) e fica com a linha de mais minutos.
   // O Wyscout às vezes exporta duplicados com a mesma chave mas dados ligeiramente
   // diferentes (provavelmente bug do exporter). Esta dedup acontece ANTES de
   // criar players/stats, garantindo um único registo por jogador no resultado.
@@ -104,9 +106,12 @@ export function parseWyscoutXlsx(buffer: ArrayBuffer | Buffer): ParseResult {
     const name = String(row['Jogador'] ?? '').trim();
     if (!name) return; // linhas vazias ignoradas no loop principal a seguir
 
-    const team = String(row['Equipa'] ?? '').trim().toLowerCase();
-    const age = String(row['Idade'] ?? '').trim();
-    const key = `${name.toLowerCase()}::${team}::${age}`;
+    // Mesma chave que a rota de import: nome + equipa + altura + pé, com a
+    // equipa do período como recurso quando 'Equipa' vem vazia.
+    const team =
+      String(row['Equipa'] ?? '').trim() ||
+      String(row['Equipa dentro de um período de tempo seleccionado'] ?? '').trim();
+    const key = playerKey(name, team, row['Altura'], row['Pé']);
 
     const minutesNow = toNumberOrNull(row['Minutos jogados:']) ?? 0;
 
@@ -131,6 +136,47 @@ export function parseWyscoutXlsx(buffer: ArrayBuffer | Buffer): ParseResult {
       );
     }
   });
+
+  // ── Fichas fantasma ──────────────────────────────────────────────────
+  // O Wyscout parte por vezes o registo de um jogador em dois: mesma pessoa,
+  // mas uma das linhas vem sem altura. A chave acima não as junta (a altura
+  // difere), por isso tratamos o caso à parte: mesmo nome + equipa + idade +
+  // posição primária, e só uma das linhas sem altura. Fica a de mais minutos e
+  // herda a altura e o pé da outra. A idade e a posição protegem os homónimos.
+  const hasHeight = (r: Record<string, unknown>) => (toNumberOrNull(r['Altura']) ?? 0) > 0;
+  const ghostKey = (r: Record<string, unknown>) =>
+    [
+      String(r['Jogador'] ?? '').trim().toLowerCase(),
+      (
+        String(r['Equipa'] ?? '').trim() ||
+        String(r['Equipa dentro de um período de tempo seleccionado'] ?? '').trim()
+      ).toLowerCase(),
+      String(r['Idade'] ?? '').trim(),
+      String(r['Posição'] ?? '').split(',')[0].trim(),
+    ].join('::');
+  const byGhostKey = new Map<string, Array<[string, IndexedRow]>>();
+  for (const entry of dedupMap.entries()) {
+    const k = ghostKey(entry[1].row);
+    const list = byGhostKey.get(k);
+    if (list) list.push(entry);
+    else byGhostKey.set(k, [entry]);
+  }
+  for (const group of byGhostKey.values()) {
+    if (group.length !== 2) continue;
+    const [a, b] = group;
+    if (hasHeight(a[1].row) === hasHeight(b[1].row)) continue; // dois jogadores a sério
+    const full = hasHeight(a[1].row) ? a : b;
+    const ghost = full === a ? b : a;
+    const minutes = (e: [string, IndexedRow]) => toNumberOrNull(e[1].row['Minutos jogados:']) ?? 0;
+    const keep = minutes(ghost) > minutes(full) ? ghost : full;
+    const merged: Record<string, unknown> = { ...keep[1].row, Altura: full[1].row['Altura'], Pé: full[1].row['Pé'] };
+    dedupMap.delete(ghost[0]);
+    dedupMap.set(full[0], { row: merged, rowIndex: keep[1].rowIndex });
+    duplicatesRemoved++;
+    warnings.push(
+      `Ficha fantasma fundida: ${String(merged['Jogador'])} / ${String(merged['Equipa'] ?? '—')} (linhas ${a[1].rowIndex} e ${b[1].rowIndex}).`
+    );
+  }
 
   // Lista deduplicada, ordenada por rowIndex original
   const dedupedRows = Array.from(dedupMap.values()).sort((a, b) => a.rowIndex - b.rowIndex);

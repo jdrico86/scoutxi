@@ -108,7 +108,10 @@ function ReportCardContent({ params }: { params: Promise<{ id: string }> }) {
       body: JSON.stringify({
         pool_id: data.pool.id,
         profile_id: selectedProfile.profile_id,
-        limit: 500,
+        // Pede só este jogador: é o caminho que devolve o detalhe por métrica.
+        // O ranking completo vem de profile_scores e não o traz — pedi-lo aqui
+        // deixava `contributions` por definir e a página rebentava.
+        player_id: id,
       }),
     })
       .then((r) => r.json())
@@ -118,7 +121,7 @@ function ReportCardContent({ params }: { params: Promise<{ id: string }> }) {
         if (found) {
           setBreakdown({
             score: found.score,
-            contributions: found.contributions,
+            contributions: found.contributions ?? [],
             missing_metrics: found.missing_metrics ?? [],
           });
         }

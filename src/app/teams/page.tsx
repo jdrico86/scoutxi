@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FavoriteStar } from '@/components/FavoriteStar';
-import { formatPoolName } from '@/lib/pools';
+import { PoolPicker } from '@/components/PoolPicker';
 
 type Pool = { id: string; name: string; season: string; competition: string | null };
 
@@ -14,6 +14,8 @@ type ProfileScore = {
   score: number;
   rank: number;
   total_eligible: number;
+  /** null se o perfil aceita a posição primária; senão, a secundária pela qual entra. */
+  via_position?: string | null;
 };
 
 type TeamPlayer = {
@@ -196,21 +198,15 @@ function TeamsContent() {
               <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-500">
                 Pool
               </label>
-              <select
+              <PoolPicker
+                pools={pools}
                 value={poolId}
-                onChange={(e) => {
-                  setPoolId(e.target.value);
+                onChange={(id) => {
+                  setPoolId(id);
                   setTeamName('');
                 }}
-                className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm"
-              >
-                <option value="">— escolher pool —</option>
-                {pools.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {formatPoolName(p.name, p.season)}
-                  </option>
-                ))}
-              </select>
+                selectClassName="rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm"
+              />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-500">
@@ -311,16 +307,6 @@ function TeamsContent() {
           </div>
         </section>
 
-        {/* Aviso sobre dados */}
-        {data && (
-          <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-            <strong>Nota sobre os dados:</strong> Jogadores aparecem associados ao seu clube atual no
-            Wyscout. Se um jogador mudou de clube durante a época, os minutos jogados podem incluir
-            tempo noutro clube. O filtro de minutos mínimos ajuda a focar nos jogadores com peso
-            real no plantel.
-          </div>
-        )}
-
         {/* Conteúdo */}
         {loading && (
           <div className="rounded-lg border border-neutral-200 bg-white p-10 text-center text-sm text-neutral-500">
@@ -367,6 +353,33 @@ function PlayerCard({ player, onClick }: { player: TeamPlayer; onClick: () => vo
   // favorito, que é ela própria um <button>, e HTML não permite um botão dentro
   // de outro — o React avisava com um erro de hidratação. O tabIndex e o
   // onKeyDown mantêm o cartão acessível por teclado.
+  const [otherOpen, setOtherOpen] = useState(false);
+  const primaryProfiles = player.profiles.filter((pr) => !pr.via_position);
+  const otherProfiles = player.profiles.filter((pr) => pr.via_position);
+  const otherPositions = Array.from(
+    new Set(otherProfiles.map((pr) => pr.via_position).filter((v): v is string => Boolean(v)))
+  );
+  const renderProfile = (pr: ProfileScore) => (
+    <li key={pr.profile_id} className="flex items-center justify-between gap-2 text-xs">
+      <span className="flex items-center gap-1.5 truncate text-neutral-700">
+        <span className="truncate">{pr.profile_name}</span>
+        {pr.via_position && (
+          <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0 text-[10px] font-medium text-amber-800">
+            sec. {pr.via_position}
+          </span>
+        )}
+        {pr.is_seed && (
+          <span className="shrink-0 rounded-full bg-blue-100 px-1.5 py-0 text-[10px] font-medium text-blue-800">
+            seed
+          </span>
+        )}
+      </span>
+      <span className="shrink-0 text-neutral-500">
+        <span className="font-semibold text-neutral-900">#{pr.rank}</span> / {pr.total_eligible}
+        <span className="ml-1 text-neutral-400">· {pr.score.toFixed(1)}</span>
+      </span>
+    </li>
+  );
   return (
     <div
       role="button"
@@ -404,24 +417,36 @@ function PlayerCard({ player, onClick }: { player: TeamPlayer; onClick: () => vo
           Não elegível em nenhum perfil aplicável.
         </p>
       ) : (
-        <ul className="mt-3 space-y-1">
-          {player.profiles.map((pr) => (
-            <li key={pr.profile_id} className="flex items-center justify-between gap-2 text-xs">
-              <span className="flex items-center gap-1.5 truncate text-neutral-700">
-                <span className="truncate">{pr.profile_name}</span>
-                {pr.is_seed && (
-                  <span className="shrink-0 rounded-full bg-blue-100 px-1.5 py-0 text-[10px] font-medium text-blue-800">
-                    seed
-                  </span>
-                )}
-              </span>
-              <span className="shrink-0 text-neutral-500">
-                <span className="font-semibold text-neutral-900">#{pr.rank}</span> / {pr.total_eligible}
-                <span className="ml-1 text-neutral-400">· {pr.score.toFixed(1)}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
+        <>
+          {/* Primeiro os perfis da posição primária; os de posições secundárias
+              ficam recolhidos, para o cartão responder a "é bom no que faz?". */}
+          {primaryProfiles.length === 0 ? (
+            <p className="mt-3 text-xs italic text-neutral-400">
+              Sem perfis para {player.position_primary ?? 'a posição dele'}.
+            </p>
+          ) : (
+            <ul className="mt-3 space-y-1">{primaryProfiles.map(renderProfile)}</ul>
+          )}
+          {otherProfiles.length > 0 && (
+            <>
+              <button
+                type="button"
+                aria-expanded={otherOpen}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOtherOpen((v) => !v);
+                }}
+                onKeyDown={(e) => e.stopPropagation()}
+                className="mt-2 text-[11px] text-neutral-500 underline hover:text-neutral-900"
+              >
+                {otherOpen
+                  ? 'Esconder outras posições'
+                  : `+ ${otherProfiles.length} noutras posições (${otherPositions.join(', ')})`}
+              </button>
+              {otherOpen && <ul className="mt-2 space-y-1">{otherProfiles.map(renderProfile)}</ul>}
+            </>
+          )}
+        </>
       )}
     </div>
   );

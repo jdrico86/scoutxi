@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FORMATIONS, type FormationDef, type SlotDef } from '@/lib/best-eleven/formations';
-import { formatPoolName } from '@/lib/pools';
+import { PoolPicker } from '@/components/PoolPicker';
 
 type Pool = { id: string; name: string; season: string; competition: string | null };
 
@@ -200,18 +200,12 @@ function BestElevenContent() {
               <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-500">
                 Pool
               </label>
-              <select
+              <PoolPicker
+                pools={pools}
                 value={selectedPoolId}
-                onChange={(e) => setSelectedPoolId(e.target.value)}
-                className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm"
-              >
-                <option value="">— escolher pool —</option>
-                {pools.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {formatPoolName(p.name, p.season)}
-                  </option>
-                ))}
-              </select>
+                onChange={setSelectedPoolId}
+                selectClassName="rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm"
+              />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-neutral-500">

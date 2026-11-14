@@ -6,6 +6,7 @@ import { X, Plus, Search, FileText, Pencil, UserSearch } from 'lucide-react';
 import { FavoriteStar } from '@/components/FavoriteStar';
 import { ShortlistMenu } from '@/components/ShortlistMenu';
 import { AddToSquadMenu } from '@/components/AddToSquadMenu';
+import { PlayerEvolution, usePlayerHistory, type SeasonEntry } from '@/components/PlayerEvolution';
 import { formatPoolName } from '@/lib/pools';
 
 type Player = {
@@ -38,7 +39,8 @@ type ApplicableProfile = {
   score: number | null;
   rank: number | null;
   eligible: boolean;
-  total_eligible: number;
+  total_eligible: number;  /** null se o perfil aceita a posição primária; senão, a secundária pela qual entra. */
+  via_position?: string | null;
 };
 
 type ShortlistEntry = {
@@ -142,6 +144,15 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
   const [error, setError] = useState<string | null>(null);
 
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  // Perfis de posições secundárias vêm recolhidos; cada grupo mostra 5 e expande.
+  const [otherOpen, setOtherOpen] = useState(false);
+  const [primaryExpanded, setPrimaryExpanded] = useState(false);
+  const [otherExpanded, setOtherExpanded] = useState(false);
+  // Épocas sobrepostas no radar (ids das fichas dessas épocas), no máximo duas.
+  const [overlayIds, setOverlayIds] = useState<string[]>([]);
+  // Histórico entre épocas: alimenta o bloco "Evolução", a sobreposição no
+  // radar e os nomes das métricas.
+  const history = usePlayerHistory(id, selectedProfileId);
   const [breakdown, setBreakdown] = useState<ProfileBreakdown | null>(null);
   const [breakdownLoading, setBreakdownLoading] = useState(false);
 
@@ -195,6 +206,10 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
     setCompareData(null);
     setCompareOpen(false);
     setBreakdown(null);
+    setOtherOpen(false);
+    setPrimaryExpanded(false);
+    setOtherExpanded(false);
+    setOverlayIds([]);
     fetch(`/api/players/${id}`)
       .then((r) => r.json())
       .then((j) => {
@@ -205,8 +220,11 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
           const eligible = (j.applicable_profiles ?? []).filter(
             (p: ApplicableProfile) => p.eligible && p.score != null
           );
-          if (eligible.length > 0) {
-            setSelectedProfileId(eligible[0].profile_id);
+          // Abre no melhor perfil da posição primária; só recorre a um perfil
+          // de posição secundária se não houver nenhum da primária.
+          const first = eligible.find((p: ApplicableProfile) => !p.via_position) ?? eligible[0];
+          if (first) {
+            setSelectedProfileId(first.profile_id);
           } else {
             setSelectedProfileId(null);
           }
@@ -301,6 +319,83 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
 
   const { player, pool, note, shortlists, applicable_profiles } = data;
   const selectedProfile = applicable_profiles.find((p) => p.profile_id === selectedProfileId);
+
+  // ── Radar: nomes das métricas e épocas para sobrepor ─────────────────
+  const metricLabels: Record<string, string> = {};
+  for (const m of history.data?.profile?.metrics ?? []) metricLabels[m.metric_code] = m.label;
+
+  const seasonLegend = (s: SeasonEntry) =>
+    `${s.season} · ${s.competition}${s.minutes_played != null ? ` · ${s.minutes_played.toLocaleString()} min` : ''}`;
+  const currentSeason = (history.data?.seasons ?? []).find((s) => s.is_current) ?? null;
+  // Só épocas em que o jogador é elegível neste perfil têm percentis para desenhar.
+  const overlayChoices = (history.data?.seasons ?? []).filter((s) => !s.is_current && s.metrics.length > 0);
+  const overlaySeasons = overlayChoices.filter((s) => overlayIds.includes(s.player_id));
+  const OVERLAY_COLORS = ['#6366f1', '#f59e0b'];
+  const toggleOverlay = (playerId: string) =>
+    setOverlayIds((prev) =>
+      prev.includes(playerId)
+        ? prev.filter((x) => x !== playerId)
+        : // Terceira escolha: sai a mais antiga das duas, para o radar não encher.
+          [...prev.slice(-1), playerId]
+    );
+
+  const GROUP_LIMIT = 5;
+  const primaryProfiles = applicable_profiles.filter((p) => !p.via_position);
+  const otherProfiles = applicable_profiles.filter((p) => p.via_position);
+  const otherPositions = Array.from(
+    new Set(otherProfiles.map((p) => p.via_position).filter((v): v is string => Boolean(v)))
+  );
+  const renderProfileRow = (p: ApplicableProfile) => {
+                    const active = p.profile_id === selectedProfileId;
+                    return (
+                      <li key={p.profile_id}>
+                        <button
+                          type="button"
+                          onClick={() => p.eligible && setSelectedProfileId(p.profile_id)}
+                          disabled={!p.eligible}
+                          className={`block w-full px-4 py-3 text-left transition-colors ${
+                            active ? 'bg-neutral-50' : 'hover:bg-neutral-50'
+                          } ${!p.eligible ? 'cursor-not-allowed opacity-60' : ''}`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="truncate text-sm font-medium text-neutral-900">
+                                  {p.profile_name}
+                                </span>
+                                {p.via_position && (
+                                  <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
+                                    sec. {p.via_position}
+                                  </span>
+                                )}
+                                {p.is_seed && (
+                                  <span className="shrink-0 rounded-full bg-blue-100 px-1.5 py-0.5 text-xs text-blue-800">
+                                    seed
+                                  </span>
+                                )}
+                              </div>
+                              {p.eligible ? (
+                                <div className="mt-0.5 text-xs text-neutral-500">
+                                  #{p.rank} de {p.total_eligible} elegíveis
+                                </div>
+                              ) : (
+                                <div className="mt-0.5 text-xs text-neutral-400">Não elegível</div>
+                              )}
+                            </div>
+                            <div className="shrink-0 text-right">
+                              {p.score != null ? (
+                                <div className="text-lg font-semibold text-neutral-900">
+                                  {p.score.toFixed(1)}
+                                </div>
+                              ) : (
+                                <div className="text-sm text-neutral-400">—</div>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      </li>
+                    );
+  };
   const statusInfo = note?.status ? STATUS_LABELS[note.status] : null;
 
   return (
@@ -461,14 +556,15 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
         {compareData ? (
           <CompareView data={compareData} />
         ) : (
+          <>
           <section className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
             <div className="rounded-lg border border-neutral-200 bg-white lg:col-span-2">
               <div className="border-b border-neutral-200 px-4 py-3">
                 <h2 className="text-sm font-semibold text-neutral-900">
-                  Scores em perfis aplicáveis
+                  Scores na posição dele ({player.position_primary ?? '—'})
                 </h2>
                 <p className="mt-0.5 text-xs text-neutral-500">
-                  Perfis cujas posições incluem {player.position_primary ?? '—'}.
+                  Perfis que aceitam a posição primária do jogador.
                 </p>
               </div>
               {applicable_profiles.length === 0 ? (
@@ -476,54 +572,69 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                   Nenhum perfil aplicável a esta posição.
                 </div>
               ) : (
-                <ul className="divide-y divide-neutral-100">
-                  {applicable_profiles.map((p) => {
-                    const active = p.profile_id === selectedProfileId;
-                    return (
-                      <li key={p.profile_id}>
-                        <button
-                          type="button"
-                          onClick={() => p.eligible && setSelectedProfileId(p.profile_id)}
-                          disabled={!p.eligible}
-                          className={`block w-full px-4 py-3 text-left transition-colors ${
-                            active ? 'bg-neutral-50' : 'hover:bg-neutral-50'
-                          } ${!p.eligible ? 'cursor-not-allowed opacity-60' : ''}`}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="truncate text-sm font-medium text-neutral-900">
-                                  {p.profile_name}
-                                </span>
-                                {p.is_seed && (
-                                  <span className="shrink-0 rounded-full bg-blue-100 px-1.5 py-0.5 text-xs text-blue-800">
-                                    seed
-                                  </span>
-                                )}
-                              </div>
-                              {p.eligible ? (
-                                <div className="mt-0.5 text-xs text-neutral-500">
-                                  #{p.rank} de {p.total_eligible} elegíveis
-                                </div>
-                              ) : (
-                                <div className="mt-0.5 text-xs text-neutral-400">Não elegível</div>
-                              )}
-                            </div>
-                            <div className="shrink-0 text-right">
-                              {p.score != null ? (
-                                <div className="text-lg font-semibold text-neutral-900">
-                                  {p.score.toFixed(1)}
-                                </div>
-                              ) : (
-                                <div className="text-sm text-neutral-400">—</div>
-                              )}
-                            </div>
-                          </div>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <>
+                  {primaryProfiles.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-neutral-500">
+                      Nenhum perfil para {player.position_primary ?? 'esta posição'}.
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-neutral-100">
+                      {(primaryExpanded ? primaryProfiles : primaryProfiles.slice(0, GROUP_LIMIT)).map(
+                        renderProfileRow
+                      )}
+                    </ul>
+                  )}
+                  {primaryProfiles.length > GROUP_LIMIT && (
+                    <button
+                      type="button"
+                      onClick={() => setPrimaryExpanded((v) => !v)}
+                      className="w-full border-t border-neutral-100 px-4 py-2 text-left text-xs text-neutral-500 underline hover:text-neutral-900"
+                    >
+                      {primaryExpanded ? 'Ver menos' : `Ver todos (${primaryProfiles.length})`}
+                    </button>
+                  )}
+
+                  {otherProfiles.length > 0 && (
+                    <div className="border-t border-neutral-200">
+                      <button
+                        type="button"
+                        onClick={() => setOtherOpen((v) => !v)}
+                        aria-expanded={otherOpen}
+                        className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-neutral-50"
+                      >
+                        <span>
+                          <span className="text-sm font-semibold text-neutral-900">
+                            Noutras posições ({otherProfiles.length})
+                          </span>
+                          <span className="mt-0.5 block text-xs text-neutral-500">
+                            Perfis em que entra por posição secundária
+                            {otherPositions.length > 0 ? ` (${otherPositions.join(', ')})` : ''}. O score
+                            compara-o com quem joga lá habitualmente.
+                          </span>
+                        </span>
+                        <span className="text-neutral-400">{otherOpen ? '▾' : '▸'}</span>
+                      </button>
+                      {otherOpen && (
+                        <>
+                          <ul className="divide-y divide-neutral-100 border-t border-neutral-100">
+                            {(otherExpanded ? otherProfiles : otherProfiles.slice(0, GROUP_LIMIT)).map(
+                              renderProfileRow
+                            )}
+                          </ul>
+                          {otherProfiles.length > GROUP_LIMIT && (
+                            <button
+                              type="button"
+                              onClick={() => setOtherExpanded((v) => !v)}
+                              className="w-full border-t border-neutral-100 px-4 py-2 text-left text-xs text-neutral-500 underline hover:text-neutral-900"
+                            >
+                              {otherExpanded ? 'Ver menos' : `Ver todos (${otherProfiles.length})`}
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
@@ -546,16 +657,67 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                 </div>
               ) : (
                 <div className="p-5">
+                  {overlayChoices.length > 0 && (
+                    <div className="mb-4 flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs text-neutral-500">Sobrepor época:</span>
+                      {overlayChoices.map((s) => {
+                        const on = overlayIds.includes(s.player_id);
+                        return (
+                          <button
+                            key={s.player_id}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => toggleOverlay(s.player_id)}
+                            title={seasonLegend(s)}
+                            className={`rounded-md border px-2 py-1 text-xs transition-colors ${
+                              on
+                                ? 'border-neutral-900 bg-neutral-900 text-white'
+                                : 'border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50'
+                            }`}
+                          >
+                            {s.season} · {s.competition}
+                          </button>
+                        );
+                      })}
+                      {overlayChoices.length > 2 && (
+                        <span className="text-xs text-neutral-400">(máx. duas de cada vez)</span>
+                      )}
+                    </div>
+                  )}
                   <Radar
+                    labels={metricLabels}
                     series={[
-                      { label: player.name, color: '#10b981', contributions: breakdown.contributions },
+                      {
+                        label: currentSeason ? seasonLegend(currentSeason) : player.name,
+                        color: '#10b981',
+                        contributions: breakdown.contributions,
+                      },
+                      ...overlaySeasons.map((s, i) => ({
+                        label: seasonLegend(s),
+                        color: OVERLAY_COLORS[i % OVERLAY_COLORS.length],
+                        dashed: true,
+                        contributions: s.metrics.map((m) => ({
+                          metric_code: m.metric_code,
+                          raw_value: m.raw_value,
+                          percentile: m.percentile ?? 0,
+                          weight: 0,
+                          contribution: 0,
+                        })),
+                      })),
                     ]}
                   />
-                  <BreakdownTable contributions={breakdown.contributions} missing={breakdown.missing_metrics} />
+                  <BreakdownTable
+                    contributions={breakdown.contributions}
+                    missing={breakdown.missing_metrics}
+                    labels={metricLabels}
+                  />
                 </div>
               )}
             </div>
           </section>
+
+          <PlayerEvolution data={history.data} error={history.error} />
+          </>
         )}
 
         {!compareData && (
@@ -931,9 +1093,12 @@ function CompareCard({
 function BreakdownTable({
   contributions,
   missing,
+  labels = {},
 }: {
   contributions: Contribution[];
   missing: string[];
+  /** Nomes das métricas por código; sem nome mostra-se o código. */
+  labels?: Record<string, string>;
 }) {
   return (
     <div className="mt-5">
@@ -953,7 +1118,9 @@ function BreakdownTable({
         <tbody>
           {contributions.map((c) => (
             <tr key={c.metric_code} className="border-t border-neutral-100">
-              <td className="py-1 pr-3 font-mono text-neutral-700">{c.metric_code}</td>
+              <td className={`py-1 pr-3 text-neutral-700 ${labels[c.metric_code] ? '' : 'font-mono'}`}>
+                {labels[c.metric_code] ?? c.metric_code}
+              </td>
               <td className="py-1 pr-3 text-right text-neutral-700">
                 {c.raw_value == null ? '—' : c.raw_value.toFixed(2)}
               </td>
@@ -969,7 +1136,9 @@ function BreakdownTable({
         </tbody>
       </table>
       {missing.length > 0 && (
-        <p className="mt-2 text-xs text-amber-700">Métricas em falta: {missing.join(', ')}</p>
+        <p className="mt-2 text-xs text-amber-700">
+          Métricas em falta: {missing.map((code) => labels[code] ?? code).join(', ')}
+        </p>
       )}
     </div>
   );
@@ -979,9 +1148,24 @@ type RadarSeries = {
   label: string;
   color: string;
   contributions: Contribution[];
+  /** Contorno tracejado e sem preenchimento: épocas sobrepostas à actual. */
+  dashed?: boolean;
 };
 
-function Radar({ series }: { series: RadarSeries[] }) {
+/** Parte um nome de métrica em até duas linhas, para caber ao lado do radar. */
+function wrapLabel(text: string, max = 20): string[] {
+  if (text.length <= max) return [text];
+  const words = text.split(' ');
+  let first = '';
+  while (words.length > 1 && (first + ' ' + words[0]).trim().length <= max) {
+    first = (first + ' ' + words.shift()).trim();
+  }
+  if (!first) first = words.shift() ?? '';
+  const rest = words.join(' ');
+  return [first, rest.length > max + 4 ? `${rest.slice(0, max + 3)}…` : rest].filter(Boolean);
+}
+
+function Radar({ series, labels = {} }: { series: RadarSeries[]; labels?: Record<string, string> }) {
   const size = 460;
   const center = size / 2;
   const radius = size / 2 - 110;
@@ -1000,7 +1184,10 @@ function Radar({ series }: { series: RadarSeries[] }) {
         <div className="mb-3 flex flex-wrap justify-center gap-4">
           {series.map((s) => (
             <div key={s.label} className="flex items-center gap-2">
-              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+              <span
+                className="inline-block h-0 w-5 border-t-2"
+                style={{ borderColor: s.color, borderTopStyle: s.dashed ? 'dashed' : 'solid' }}
+              />
               <span className="text-xs text-neutral-700">{s.label}</span>
             </div>
           ))}
@@ -1054,7 +1241,14 @@ function Radar({ series }: { series: RadarSeries[] }) {
           const pathD = points.map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(' ') + ' Z';
           return (
             <g key={s.label}>
-              <path d={pathD} fill={s.color} fillOpacity={series.length > 1 ? 0.18 : 0.22} stroke={s.color} strokeWidth={2} />
+              <path
+                d={pathD}
+                fill={s.dashed ? 'none' : s.color}
+                fillOpacity={series.length > 1 ? 0.18 : 0.22}
+                stroke={s.color}
+                strokeWidth={2}
+                strokeDasharray={s.dashed ? '6 4' : undefined}
+              />
               {points.map((p, i) => (
                 <circle key={`dot-${s.label}-${i}`} cx={p.x} cy={p.y} r={3} fill={s.color} />
               ))}
@@ -1070,23 +1264,28 @@ function Radar({ series }: { series: RadarSeries[] }) {
           if (labelX < center - 10) anchor = 'end';
           else if (labelX > center + 10) anchor = 'start';
 
+          const named = labels[code];
+          const lines = wrapLabel(named ?? code, named ? 20 : 40);
           const percentiles = series
             .map((s) => s.contributions.find((c) => c.metric_code === code)?.percentile ?? null)
             .map((v) => (v == null ? '—' : v.toFixed(0)));
 
           return (
             <g key={`label-${i}`}>
-              <text
-                x={labelX}
-                y={labelY - 6}
-                textAnchor={anchor}
-                dominantBaseline="middle"
-                fontSize={10}
-                fill="#525252"
-                fontFamily="monospace"
-              >
-                {code}
-              </text>
+              {lines.map((line, li) => (
+                <text
+                  key={li}
+                  x={labelX}
+                  y={labelY - 6 - (lines.length - 1 - li) * 11}
+                  textAnchor={anchor}
+                  dominantBaseline="middle"
+                  fontSize={10}
+                  fill="#525252"
+                  fontFamily={named ? undefined : 'monospace'}
+                >
+                  {line}
+                </text>
+              ))}
               <text
                 x={labelX}
                 y={labelY + 7}

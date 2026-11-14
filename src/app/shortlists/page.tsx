@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PoolPicker } from '@/components/PoolPicker';
 import { useRouter } from 'next/navigation';
 
 type Shortlist = {
@@ -186,18 +187,12 @@ export default function ShortlistsPage() {
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                   <div>
                     <label className="block text-xs font-medium text-neutral-600">Pool</label>
-                    <select
+                    <PoolPicker
+                      pools={pools}
                       value={formPoolId}
-                      onChange={(e) => setFormPoolId(e.target.value)}
-                      className="mt-1 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm"
-                    >
-                      <option value="">— escolhe —</option>
-                      {pools.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setFormPoolId}
+                      className="mt-1"
+                    />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-neutral-600">Perfil</label>

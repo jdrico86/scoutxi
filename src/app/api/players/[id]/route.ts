@@ -148,7 +148,20 @@ export async function GET(_: NextRequest, { params }: Params) {
     eligible: boolean;
     eligibility_reason: string | null;
     total_eligible: number;
+    /**
+     * null quando o perfil aceita a posição PRIMÁRIA do jogador; senão, a
+     * posição secundária pela qual ele entra. A ficha separa os dois grupos:
+     * um CF com AMF secundário não deve abrir como médio ofensivo.
+     */
+    via_position: string | null;
   }> = [];
+
+  const primaryPosition = (player.position_primary ?? '').trim();
+  const viaPositionOf = (filters: unknown): string | null => {
+    const accepted = (filters as { positions?: string[] } | null)?.positions ?? [];
+    if (primaryPosition && accepted.includes(primaryPosition)) return null;
+    return playerPositions(player).find((pos) => accepted.includes(pos)) ?? null;
+  };
 
   if (pool && applicableProfiles.length > 0) {
     // Scores lidos de profile_scores em vez de recalcular a pool inteira — ver
@@ -214,6 +227,7 @@ export async function GET(_: NextRequest, { params }: Params) {
           eligible: true,
           eligibility_reason: null,
           total_eligible: total,
+          via_position: viaPositionOf(profileRow.filters),
         });
       } else {
         const reason = getEligibilityReason(player, profileRow.filters as ProfileFilters | null);
@@ -227,6 +241,7 @@ export async function GET(_: NextRequest, { params }: Params) {
           eligible: false,
           eligibility_reason: reason,
           total_eligible: total,
+          via_position: viaPositionOf(profileRow.filters),
         });
       }
     }

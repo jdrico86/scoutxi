@@ -65,6 +65,33 @@ export type Database = {
         }
         Relationships: []
       }
+      player_identities: {
+        Row: {
+          birth_year_est: number | null
+          created_at: string
+          foot: string | null
+          height_cm: number | null
+          id: string
+          name: string
+        }
+        Insert: {
+          birth_year_est?: number | null
+          created_at?: string
+          foot?: string | null
+          height_cm?: number | null
+          id?: string
+          name: string
+        }
+        Update: {
+          birth_year_est?: number | null
+          created_at?: string
+          foot?: string | null
+          height_cm?: number | null
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
       player_notes: {
         Row: {
           contact_info: Json | null
@@ -215,6 +242,7 @@ export type Database = {
           games_played: number | null
           height_cm: number | null
           id: string
+          identity_id: string | null
           market_value_eur: number | null
           minutes_played: number | null
           name: string
@@ -238,6 +266,7 @@ export type Database = {
           games_played?: number | null
           height_cm?: number | null
           id?: string
+          identity_id?: string | null
           market_value_eur?: number | null
           minutes_played?: number | null
           name: string
@@ -261,6 +290,7 @@ export type Database = {
           games_played?: number | null
           height_cm?: number | null
           id?: string
+          identity_id?: string | null
           market_value_eur?: number | null
           minutes_played?: number | null
           name?: string
@@ -321,35 +351,44 @@ export type Database = {
       pools: {
         Row: {
           competition: string | null
+          country: string | null
           created_at: string | null
           file_name: string | null
           id: string
+          last_imported_at: string | null
           name: string
           notes: string | null
           owner: string | null
           season: string
+          tier: number | null
           source: string
         }
         Insert: {
           competition?: string | null
+          country?: string | null
           created_at?: string | null
           file_name?: string | null
           id?: string
+          last_imported_at?: string | null
           name: string
           notes?: string | null
           owner?: string | null
           season: string
+          tier?: number | null
           source: string
         }
         Update: {
           competition?: string | null
+          country?: string | null
           created_at?: string | null
           file_name?: string | null
           id?: string
+          last_imported_at?: string | null
           name?: string
           notes?: string | null
           owner?: string | null
           season?: string
+          tier?: number | null
           source?: string
         }
         Relationships: []
@@ -612,7 +651,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      link_player_identities: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          linkable_players: number
+          linked_players: number
+          identities: number
+          ambiguous_players: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

@@ -11,7 +11,7 @@ import {
 } from '@/components/SimilarityResultsTable';
 import type { Metric } from '@/components/MetricPickerModal';
 import { POSITION_METRICS } from '@/lib/similarity/position-metrics';
-import { formatPoolName } from '@/lib/pools';
+import { competitionLabel, formatPoolName, groupPoolsByCountry, poolSeasons } from '@/lib/pools';
 
 type Pool = { id: string; name: string; season: string };
 
@@ -657,24 +657,32 @@ function SimilaridadeContent() {
               <label className="block text-xs font-medium text-neutral-700">
                 Pools-alvo {targetPoolIds.length > 0 && <span className="text-neutral-400">({targetPoolIds.length})</span>}
               </label>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {pools.map((p) => {
-                  const on = targetPoolIds.includes(p.id);
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => toggleTargetPool(p.id)}
-                      className={`rounded-md border px-2 py-1 text-xs transition-colors ${
-                        on
-                          ? 'border-neutral-900 bg-neutral-900 text-white'
-                          : 'border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50'
-                      }`}
-                    >
-                      {formatPoolName(p.name, p.season)}
-                    </button>
-                  );
-                })}
+              <div className="mt-2 space-y-1.5">
+                {poolSeasons(pools).map((season) => (
+                  <div key={season} className="flex flex-wrap items-center gap-1.5">
+                    <span className="w-12 shrink-0 text-xs font-medium text-neutral-500">{season}</span>
+                    {groupPoolsByCountry(pools, season).flatMap((g) =>
+                      g.pools.map((p) => {
+                        const on = targetPoolIds.includes(p.id);
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            title={`${g.country} · ${formatPoolName(p.name, p.season)}`}
+                            onClick={() => toggleTargetPool(p.id)}
+                            className={`rounded-md border px-2 py-1 text-xs transition-colors ${
+                              on
+                                ? 'border-neutral-900 bg-neutral-900 text-white'
+                                : 'border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50'
+                            }`}
+                          >
+                            {competitionLabel(p)}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
 

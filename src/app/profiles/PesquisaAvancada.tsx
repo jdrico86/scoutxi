@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, RotateCw, Check, X } from 'lucide-react';
-import { formatPoolName } from '@/lib/pools';
+import { PoolPicker } from '@/components/PoolPicker';
 import { MetricPickerModal, type Metric } from '@/components/MetricPickerModal';
 import {
   MetricFilterRow,
@@ -417,18 +417,12 @@ export function PesquisaAvancada() {
           <div>
             <label className="block text-xs font-medium text-neutral-700">Pool</label>
             <div className="mt-1 flex items-center gap-2">
-              <select
+              <PoolPicker
+                pools={pools}
                 value={poolId}
-                onChange={(e) => setPoolId(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm md:max-w-md"
-              >
-                <option value="">— escolhe pool —</option>
-                {pools.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {formatPoolName(p.name, p.season)}
-                  </option>
-                ))}
-              </select>
+                onChange={setPoolId}
+                className="w-full md:max-w-md"
+              />
               {poolId && (
                 <button
                   type="button"

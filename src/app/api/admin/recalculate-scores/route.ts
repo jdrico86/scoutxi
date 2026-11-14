@@ -29,6 +29,50 @@ const BodySchema = z.union([
   z.object({ all: z.literal(true), profile_ids: z.array(z.string().uuid()).optional() }),
 ]);
 
+/**
+ * GET /api/admin/recalculate-scores
+ *
+ * Diz que pools ainda não têm scores de perfis guardados. Serve o painel de
+ * administração, que as calcula uma a uma: a evolução entre épocas precisa dos
+ * scores das épocas antigas, que o import de então não gravava.
+ */
+export async function GET() {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
+
+  const { data: adminCheck } = await supabase
+    .from('allowed_users')
+    .select('is_admin')
+    .eq('email', user.email ?? '')
+    .maybeSingle();
+  if (!((adminCheck as { is_admin?: boolean } | null)?.is_admin ?? false)) {
+    return NextResponse.json({ error: 'Apenas admin.' }, { status: 403 });
+  }
+
+  const { data: pools, error: poolsErr } = await supabase.from('pools').select('id, name, season');
+  if (poolsErr) return NextResponse.json({ error: poolsErr.message }, { status: 500 });
+
+  // Uma linha de rank 1 por perfil chega para saber se a pool tem scores.
+  const { data: heads, error: headsErr } = await supabase
+    .from('profile_scores')
+    .select('pool_id')
+    .eq('rank', 1);
+  if (headsErr) return NextResponse.json({ error: headsErr.message }, { status: 500 });
+  const withScores = new Set((heads ?? []).map((h) => h.pool_id as string));
+
+  const all = ((pools ?? []) as Array<{ id: string; name: string; season: string }>).map((p) => ({
+    id: p.id,
+    name: formatPoolName(p.name, p.season),
+    has_scores: withScores.has(p.id),
+  }));
+  return NextResponse.json({ pools: all, missing: all.filter((p) => !p.has_scores) });
+}
+
 export async function POST(req: NextRequest) {
   const user = await getAuthUser();
   if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });

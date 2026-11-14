@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FavoriteStar } from '@/components/FavoriteStar';
-import { formatPoolName } from '@/lib/pools';
+import { PoolPicker } from '@/components/PoolPicker';
 
 type ProfileListItem = {
   id: string;
@@ -37,6 +37,7 @@ type RankedPlayer = {
   name: string;
   current_team: string | null;
   position_primary: string | null;
+  positions_secondary?: string[] | null;
   age: number | null;
   minutes_played: number | null;
   contract_until: string | null;
@@ -139,6 +140,9 @@ export function PerfisGuardados() {
   );
   const [maxValue, setMaxValue] = useState(numParam(searchParams.get('value')));
   const [hideUnknown, setHideUnknown] = useState(searchParams.get('known') === '1');
+  // Esconde quem só entra no perfil por uma posição secundária. Desligado por
+  // defeito: a lista mostra todos, com etiqueta em quem entra por secundária.
+  const [primaryOnly, setPrimaryOnly] = useState(searchParams.get('prim') === '1');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   // Sincronizar URL sempre que mudam as selecções. Mantém ?tab= se presente.
@@ -158,6 +162,7 @@ export function PerfisGuardados() {
     if (contractBefore) params.set('contract', contractBefore);
     if (maxValue) params.set('value', maxValue);
     if (hideUnknown) params.set('known', '1');
+    if (primaryOnly) params.set('prim', '1');
     const next = params.toString();
     const current = searchParams.toString();
     if (next !== current) {
@@ -174,6 +179,7 @@ export function PerfisGuardados() {
     contractBefore,
     maxValue,
     hideUnknown,
+    primaryOnly,
     router,
     searchParams,
   ]);
@@ -306,6 +312,24 @@ export function PerfisGuardados() {
     return map;
   }, [result]);
 
+  /**
+   * Posição secundária pela qual o jogador entra no perfil, ou null se entra
+   * pela primária. Um extremo com CF secundário aparece num perfil de
+   * ponta-de-lança; a etiqueta diz que não é esse o lugar habitual dele.
+   */
+  const profilePositions = useMemo(
+    () => profiles.find((p) => p.id === result?.profile.id)?.filters?.positions ?? [],
+    [profiles, result]
+  );
+  const viaSecondary = useCallback(
+    (p: RankedPlayer): string | null => {
+      if (profilePositions.length === 0) return null;
+      if (p.position_primary && profilePositions.includes(p.position_primary)) return null;
+      return (p.positions_secondary ?? []).find((pos) => profilePositions.includes(pos)) ?? null;
+    },
+    [profilePositions]
+  );
+
   const filtered = useMemo(() => {
     if (!result) return [];
     const scoreMin = minScore ? Number(minScore) : null;
@@ -314,6 +338,7 @@ export function PerfisGuardados() {
     const valueMax = maxValue ? Number(maxValue) : null;
 
     const rows = result.ranked.filter((p) => {
+      if (primaryOnly && viaSecondary(p) != null) return false;
       if (scoreMin != null && p.score < scoreMin) return false;
       if (ageMax != null && (p.age == null || p.age > ageMax)) return false;
       if (minutesMin != null && (p.minutes_played ?? 0) < minutesMin) return false;
@@ -346,11 +371,24 @@ export function PerfisGuardados() {
       // Empate: desempata pela posição no perfil.
       return (rankOf.get(a.player_id) ?? 0) - (rankOf.get(b.player_id) ?? 0);
     });
-  }, [result, rankOf, sortKey, sortDir, minScore, maxAge, minMinutes, contractBefore, maxValue, hideUnknown]);
+  }, [
+    result,
+    rankOf,
+    sortKey,
+    sortDir,
+    minScore,
+    maxAge,
+    minMinutes,
+    contractBefore,
+    maxValue,
+    hideUnknown,
+    primaryOnly,
+    viaSecondary,
+  ]);
 
   const shown = filtered.slice(0, visibleCount);
   const filtersActive =
-    Boolean(minScore || maxAge || minMinutes || contractBefore || maxValue) || hideUnknown;
+    Boolean(minScore || maxAge || minMinutes || contractBefore || maxValue) || hideUnknown || primaryOnly;
   const sortActive = sortKey !== 'score' || sortDir !== 'desc';
 
   const handleSort = (key: SortKey) => {
@@ -374,6 +412,7 @@ export function PerfisGuardados() {
     setContractBefore('');
     setMaxValue('');
     setHideUnknown(false);
+    setPrimaryOnly(false);
     setSortKey('score');
     setSortDir('desc');
     setVisibleCount(PAGE_SIZE);
@@ -529,18 +568,12 @@ export function PerfisGuardados() {
 
           <div>
             <label className="block text-xs font-medium text-neutral-700">Pool</label>
-            <select
+            <PoolPicker
+              pools={pools}
               value={selectedPoolId}
-              onChange={(e) => setSelectedPoolId(e.target.value)}
-              className="mt-1 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm"
-            >
-              <option value="">— escolhe um pool —</option>
-              {pools.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {formatPoolName(p.name, p.season)}
-                </option>
-              ))}
-            </select>
+              onChange={setSelectedPoolId}
+              className="mt-1"
+            />
           </div>
         </div>
 
@@ -658,6 +691,17 @@ export function PerfisGuardados() {
                   }}
                 />
                 Esconder quem não tem valor ou contrato registado
+              </label>
+              <label className="flex items-center gap-2 pb-1.5 text-neutral-600">
+                <input
+                  type="checkbox"
+                  checked={primaryOnly}
+                  onChange={(e) => {
+                    setPrimaryOnly(e.target.checked);
+                    setVisibleCount(PAGE_SIZE);
+                  }}
+                />
+                Só posição primária
               </label>
               {(filtersActive || sortActive) && (
                 <button
@@ -782,7 +826,17 @@ export function PerfisGuardados() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-neutral-700">{p.current_team ?? '—'}</td>
-                      <td className="px-4 py-3 text-neutral-600">{p.position_primary ?? '—'}</td>
+                      <td className="px-4 py-3 text-neutral-600">
+                        {p.position_primary ?? '—'}
+                        {viaSecondary(p) && (
+                          <span
+                            title={`Entra neste perfil pela posição secundária ${viaSecondary(p)}`}
+                            className="ml-1.5 whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800"
+                          >
+                            sec. {viaSecondary(p)}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-neutral-600">{p.age ?? '—'}</td>
                       <td className="px-4 py-3 text-neutral-600">
                         {p.minutes_played?.toLocaleString() ?? '—'}

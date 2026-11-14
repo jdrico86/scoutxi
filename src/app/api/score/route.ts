@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Database } from '@/lib/supabase/database.types';
 import { loadPoolData, loadProfile } from '@/lib/scouting/db-helpers';
 import { scoreProfile, resolvePeerPositions } from '@/lib/scouting/scorer';
+import { scorePlayerInProfile } from '@/lib/scouting/score-player';
 import { getAuthUser } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
@@ -99,75 +100,35 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Caminho rápido: detalhe de um jogador só ──────────────────────────
-  //
-  //    O score de um jogador depende apenas dos valores dele e da distribuição
-  //    das métricas do perfil dentro do peer group. Não é preciso a pool toda:
-  //    basta o peer group (posição primária) e as métricas com peso. Num perfil
-  //    de AMF são ~47 jogadores × 6 métricas, contra 1261 × 45.
+  //    Carrega só o peer group e as métricas com peso — ver
+  //    lib/scouting/score-player.ts.
   const peerPositions = resolvePeerPositions(profileData.profile);
-  const weightedCodes = Array.from(new Set(profileData.profile.weights.map((w) => w.metric_code)));
 
-  if (body.player_id && peerPositions.length > 0 && weightedCodes.length > 0) {
-    const PLAYER_COLS =
-      'id, name, current_team, position_primary, positions_secondary, age, minutes_played, contract_until, market_value_eur, on_loan';
-
-    const { data: peerRows, error: peerErr } = await supabase
-      .from('players')
-      .select(PLAYER_COLS)
-      .eq('pool_id', body.pool_id)
-      .in('position_primary', peerPositions);
-    if (peerErr) return NextResponse.json({ error: peerErr.message }, { status: 500 });
-
-    // O jogador pode ser elegível por posição secundária e não estar no peer group.
-    const subset = [...(peerRows ?? [])];
-    if (!subset.some((p) => p.id === body.player_id)) {
-      const { data: target } = await supabase
-        .from('players')
-        .select(PLAYER_COLS)
-        .eq('id', body.player_id)
-        .maybeSingle();
-      if (target) subset.push(target);
+  if (body.player_id) {
+    let detail;
+    try {
+      detail = await scorePlayerInProfile(supabase, {
+        poolId: body.pool_id,
+        profile: profileData.profile,
+        playerId: body.player_id,
+      });
+    } catch (err) {
+      return NextResponse.json({ error: (err as Error).message }, { status: 500 });
     }
-
-    const { data: metricsRows } = await supabase.from('metrics').select('code, direction');
-    const subsetDirections: Record<string, 'higher' | 'lower'> = {};
-    for (const m of (metricsRows ?? []) as Array<{ code: string; direction: string | null }>) {
-      subsetDirections[m.code] =
-        m.direction === 'lower' || m.direction === 'lower_better' ? 'lower' : 'higher';
+    if (detail) {
+      return NextResponse.json({
+        ok: true,
+        pool: poolData,
+        profile: { id: profileData.id, name: profileData.profile.name },
+        peer_group_size: detail.peer_group_size,
+        // O rank e o total de elegíveis verdadeiros vêm de profile_scores, não
+        // deste subconjunto — aqui só interessa o breakdown por métrica.
+        ranked: detail.scored ? [detail.scored] : [],
+        warnings: detail.warnings,
+        partial: true,
+      });
     }
-
-    const subsetStats: Array<{ player_id: string; metric_code: string; metric_value: number | null }> = [];
-    for (const ids of chunk(subset.map((p) => p.id), 100)) {
-      const { data, error } = await supabase
-        .from('player_stats')
-        .select('player_id, metric_code, metric_value')
-        .in('player_id', ids)
-        .in('metric_code', weightedCodes);
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      subsetStats.push(...(data ?? []));
-    }
-
-    const subsetResult = scoreProfile({
-      pool_id: body.pool_id,
-      profile: profileData.profile,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      players: subset as any,
-      stats: subsetStats,
-      metric_directions: subsetDirections,
-    });
-
-    const found = subsetResult.ranked.find((p) => p.player_id === body.player_id);
-    return NextResponse.json({
-      ok: true,
-      pool: poolData,
-      profile: { id: profileData.id, name: profileData.profile.name },
-      peer_group_size: subsetResult.peer_group_size,
-      // O rank e o total de elegíveis verdadeiros vêm de profile_scores, não
-      // deste subconjunto — aqui só interessa o breakdown por métrica.
-      ranked: found ? [found] : [],
-      warnings: subsetResult.warnings,
-      partial: true,
-    });
+    // Perfil sem peer group ou sem pesos: segue para o cálculo completo.
   }
 
   // ── Ranking a partir de profile_scores ────────────────────────────────
@@ -196,7 +157,7 @@ export async function POST(req: NextRequest) {
       const wanted = body.limit ? cachedRows.slice(0, body.limit) : cachedRows;
 
       const RANK_COLS =
-        'id, name, current_team, position_primary, age, minutes_played, contract_until, market_value_eur';
+        'id, name, current_team, position_primary, positions_secondary, age, minutes_played, contract_until, market_value_eur';
       const pages = await Promise.all(
         chunk(wanted.map((r) => r.player_id), 100).map((ids) =>
           supabase.from('players').select(RANK_COLS).in('id', ids)
@@ -246,6 +207,7 @@ export async function POST(req: NextRequest) {
             name: p.name,
             current_team: p.current_team,
             position_primary: p.position_primary,
+            positions_secondary: p.positions_secondary,
             age: p.age,
             minutes_played: p.minutes_played,
             contract_until: p.contract_until,
@@ -273,6 +235,7 @@ export async function POST(req: NextRequest) {
 
   // ── Caminho completo: ranking calculado ao vivo ─────────────────────────────────
   const { players, stats, directions } = await loadPoolData(supabase, body.pool_id);
+  const secondaryById = new Map(players.map((p) => [p.id, p.positions_secondary ?? null]));
 
   // Correr scorer
   const result = scoreProfile({
@@ -308,6 +271,10 @@ export async function POST(req: NextRequest) {
     peer_group_size: result.peer_group_size,
     eligible_count: result.eligible_count,
     warnings: result.warnings,
-    ranked: body.limit ? result.ranked.slice(0, body.limit) : result.ranked,
+    // As secundárias vão junto para o cliente marcar quem entra no perfil por elas.
+    ranked: (body.limit ? result.ranked.slice(0, body.limit) : result.ranked).map((r) => ({
+      ...r,
+      positions_secondary: secondaryById.get(r.player_id) ?? null,
+    })),
   });
 }

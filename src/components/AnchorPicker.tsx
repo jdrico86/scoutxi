@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
-import { formatPoolName } from '@/lib/pools';
+import { PoolPicker } from '@/components/PoolPicker';
 
 export type AnchorSelection = {
   pool_id: string;
@@ -114,23 +114,17 @@ export function AnchorPicker({ pools, selectedPoolId, onPoolChange, anchor, onAn
     <div className="space-y-3">
       <div>
         <label className="block text-xs font-medium text-neutral-700">Pool da âncora</label>
-        <select
+        <PoolPicker
+          pools={pools}
           value={selectedPoolId}
-          onChange={(e) => {
-            onPoolChange(e.target.value);
-            if (anchor && anchor.pool_id !== e.target.value) onAnchorChange(null);
+          onChange={(id) => {
+            onPoolChange(id);
+            if (anchor && anchor.pool_id !== id) onAnchorChange(null);
             setQuery('');
             setResults([]);
           }}
-          className="mt-1 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm md:max-w-md"
-        >
-          <option value="">— escolhe pool —</option>
-          {pools.map((p) => (
-            <option key={p.id} value={p.id}>
-              {formatPoolName(p.name, p.season)}
-            </option>
-          ))}
-        </select>
+          className="mt-1 w-full md:max-w-md"
+        />
       </div>
 
       <div>

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/database.types';
 import { loadPoolData, profileRowToProfile } from '@/lib/scouting/db-helpers';
-import { matchesPositions } from '@/lib/scouting/positions';
+import { matchesPositions, playerPositions } from '@/lib/scouting/positions';
 import { recalculateProfileScores } from '@/lib/scouting/recalculate-scores';
 import { scoreProfile } from '@/lib/scouting/scorer';
 import { getAuthUser } from '@/lib/supabase/server';
@@ -17,6 +17,8 @@ type ProfileScoreEntry = {
   score: number;
   rank: number;
   total_eligible: number;
+  /** null se o perfil aceita a posição primária; senão, a secundária pela qual entra. */
+  via_position: string | null;
 };
 
 type TeamPlayer = {
@@ -223,6 +225,10 @@ export async function GET(req: NextRequest) {
         score: found.score,
         rank: found.rank,
         total_eligible: profileResult.total,
+        via_position:
+          p.position_primary && positions.includes(p.position_primary.trim())
+            ? null
+            : (playerPositions(p).find((pos) => positions.includes(pos)) ?? null),
       });
     }
 

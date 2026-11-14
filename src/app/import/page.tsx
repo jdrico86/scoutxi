@@ -24,6 +24,9 @@ export default function ImportPage() {
   const [poolName, setPoolName] = useState('Campeonato de Portugal 25/26');
   const [season, setSeason] = useState('25/26');
   const [competition, setCompetition] = useState('Campeonato de Portugal');
+  // País e escalão arrumam a pool na escolha de pool (época → país → escalão).
+  const [country, setCountry] = useState('Portugal');
+  const [tier, setTier] = useState('4');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ApiResponse | null>(null);
 
@@ -38,6 +41,8 @@ export default function ImportPage() {
     fd.append('pool_name', poolName);
     fd.append('season', season);
     if (competition) fd.append('competition', competition);
+    if (country.trim()) fd.append('country', country.trim());
+    if (tier.trim()) fd.append('tier', tier.trim());
 
     try {
       const res = await fetch('/api/import/wyscout', { method: 'POST', body: fd });
@@ -90,6 +95,32 @@ export default function ImportPage() {
                 onChange={(e) => setCompetition(e.target.value)}
                 className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
               />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-neutral-700">País</label>
+              <input
+                type="text"
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-neutral-700">Escalão</label>
+              <input
+                type="number"
+                min={1}
+                value={tier}
+                onChange={(e) => setTier(e.target.value)}
+                className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+              />
+              <p className="mt-1 text-xs text-neutral-500">
+                1 = primeira divisão. Em Portugal: Liga Portugal 1, Liga 2 2, Liga 3 3, Campeonato de
+                Portugal 4, Liga Revelação 5.
+              </p>
             </div>
           </div>
 

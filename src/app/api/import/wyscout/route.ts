@@ -26,6 +26,8 @@ const BATCH_STATS = 1000;
  *   pool_name:   string          (obrigatório)  ex: "Campeonato de Portugal 25/26"
  *   season:      string          (obrigatório)  ex: "25/26"
  *   competition: string          (opcional)
+ *   country:     string          (opcional)  ex: "Portugal" — agrupa a pool na escolha de pool
+ *   tier:        inteiro         (opcional)  escalão dentro do país, 1 = primeira divisão
  *   source:      string          (opcional, default "wyscout")
  *
  * Comportamento: upsert por (pool_id, nome, equipa, altura, pé) — ver lib/wyscout/player-key.ts.
@@ -79,6 +81,12 @@ export async function POST(req: NextRequest) {
   const season = String(formData.get('season') ?? '').trim();
   const competition = String(formData.get('competition') ?? '').trim() || null;
   const source = String(formData.get('source') ?? 'wyscout_xlsx').trim();
+  // País e escalão: só se escrevem quando vêm no pedido, para uma reimportação
+  // sem estes campos não apagar o que a pool já tem.
+  const country = String(formData.get('country') ?? '').trim() || null;
+  const tierRaw = parseInt(String(formData.get('tier') ?? ''), 10);
+  const tier = Number.isInteger(tierRaw) && tierRaw > 0 ? tierRaw : null;
+  const placement = { ...(country ? { country } : {}), ...(tier ? { tier } : {}) };
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: 'Campo "file" em falta.' }, { status: 400 });
@@ -114,12 +122,12 @@ export async function POST(req: NextRequest) {
     // Actualiza metadados (ficheiro, competição)
     await supabase
       .from('pools')
-      .update({ competition, file_name: file.name, source })
+      .update({ competition, file_name: file.name, source, last_imported_at: new Date().toISOString(), ...placement })
       .eq('id', poolId);
   } else {
     const { data: newPool, error: poolErr } = await supabase
       .from('pools')
-      .insert({ name: poolName, season, source, competition, file_name: file.name })
+      .insert({ name: poolName, season, source, competition, file_name: file.name, last_imported_at: new Date().toISOString(), ...placement })
       .select('id')
       .single();
     if (poolErr || !newPool) {
@@ -250,6 +258,17 @@ export async function POST(req: NextRequest) {
     statsInserted += batch.length;
   }
 
+  // 6b) Ligar os jogadores novos à mesma pessoa noutras épocas e pools
+  //     (função `link_player_identities` na base de dados: nome + altura + pé +
+  //     idade coerente; na dúvida não liga). Erro aqui não falha o import.
+  let identitiesResult: { ok: boolean; linked?: number; ambiguous?: number; error?: string };
+  {
+    const { data: linkRows, error: linkErr } = await supabase.rpc('link_player_identities');
+    identitiesResult = linkErr
+      ? { ok: false, error: linkErr.message }
+      : { ok: true, linked: linkRows?.[0]?.linked_players, ambiguous: linkRows?.[0]?.ambiguous_players };
+  }
+
   // 7) Recalcular player_percentiles para esta pool, FORA da "transação" do import:
   //    erros aqui são reportados como warnings mas NÃO falham o import (que já está
   //    consolidado na BD). Admin pode re-trigger manualmente via
@@ -291,5 +310,6 @@ export async function POST(req: NextRequest) {
     warnings: parsed.warnings,
     percentiles: percentilesResult,
     profile_scores: scoresResult,
+    identities: identitiesResult,
   });
 }

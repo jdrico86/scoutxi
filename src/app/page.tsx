@@ -1,13 +1,40 @@
-import { supabase } from '@/lib/supabase/client';
+import { createClient } from '@supabase/supabase-js';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import HomeShortcuts from './HomeShortcuts';
 
 export default async function HomePage() {
-  // Queries paralelas (server-side, como estava antes)
+  // A sessão só serve para saber quem é o utilizador. As contagens fazem-se
+  // com a chave de serviço, no servidor, como em todas as rotas: a base de
+  // dados não aceita leituras directas de mais ninguém. Perfis e shortlists
+  // contam-se pelo que ELE vê (perfis seed + os seus; as suas shortlists).
+  const session = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await session.auth.getUser();
+  const userId = user?.id ?? '00000000-0000-0000-0000-000000000000';
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) {
+    return (
+      <main className="p-10">
+        <div className="mx-auto max-w-4xl rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-900">
+          Variáveis de ambiente do Supabase em falta (NEXT_PUBLIC_SUPABASE_URL ou
+          SUPABASE_SERVICE_ROLE_KEY).
+        </div>
+      </main>
+    );
+  }
+  const supabase = createClient(url, serviceKey, { auth: { persistSession: false } });
+
   const [poolsResult, playersResult, profilesResult, shortlistsResult] = await Promise.all([
     supabase.from('pools').select('*', { count: 'exact', head: true }),
     supabase.from('players').select('*', { count: 'exact', head: true }),
-    supabase.from('scouting_profiles').select('*', { count: 'exact', head: true }),
-    supabase.from('shortlists').select('*', { count: 'exact', head: true }),
+    supabase
+      .from('scouting_profiles')
+      .select('*', { count: 'exact', head: true })
+      .or(`owner_id.is.null,owner_id.eq.${userId}`),
+    supabase.from('shortlists').select('*', { count: 'exact', head: true }).eq('owner_id', userId),
   ]);
 
   const poolsCount = poolsResult.count ?? 0;

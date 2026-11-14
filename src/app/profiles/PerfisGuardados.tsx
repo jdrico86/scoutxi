@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FavoriteStar } from '@/components/FavoriteStar';
 import { formatPoolName } from '@/lib/pools';
@@ -42,9 +42,16 @@ type RankedPlayer = {
   contract_until: string | null;
   market_value_eur: number | null;
   score: number;
-  contributions: Contribution[];
-  missing_metrics: string[];
+  /** Só vêm quando o ranking é calculado ao vivo; do cache chegam a pedido. */
+  contributions?: Contribution[];
+  missing_metrics?: string[];
 };
+
+/** Detalhe por métrica de uma linha, pedido quando a linha é aberta. */
+type RowDetail =
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; contributions: Contribution[]; missing_metrics: string[] };
 
 type ScoreResponse = {
   ok: boolean;
@@ -56,6 +63,43 @@ type ScoreResponse = {
   warnings: string[];
   ranked: RankedPlayer[];
 };
+
+type SortKey = 'score' | 'age' | 'minutes' | 'contract' | 'value';
+type SortDir = 'asc' | 'desc';
+
+/** Sentido por defeito ao clicar numa coluna pela primeira vez. */
+const DEFAULT_DIR: Record<SortKey, SortDir> = {
+  score: 'desc',
+  age: 'asc',
+  minutes: 'desc',
+  contract: 'asc',
+  value: 'asc',
+};
+
+/** Quantas linhas a tabela mostra à partida, e quantas acrescenta a cada pedido. */
+const PAGE_SIZE = 20;
+/** Máximo que a rota das shortlists aceita de uma vez. */
+const SHORTLIST_MAX = 200;
+
+function sortValue(p: RankedPlayer, key: SortKey): number | string | null {
+  switch (key) {
+    case 'score':
+      return p.score;
+    case 'age':
+      return p.age;
+    case 'minutes':
+      return p.minutes_played;
+    case 'contract':
+      return p.contract_until;
+    case 'value':
+      // 0 no Wyscout é "sem valor", não "grátis".
+      return p.market_value_eur && p.market_value_eur > 0 ? p.market_value_eur : null;
+  }
+}
+
+function numParam(v: string | null): string {
+  return v && /^\d+(\.\d+)?$/.test(v) ? v : '';
+}
 
 export function PerfisGuardados() {
   const router = useRouter();
@@ -71,7 +115,31 @@ export function PerfisGuardados() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [rowDetails, setRowDetails] = useState<Record<string, RowDetail>>({});
   const [profilesListOpen, setProfilesListOpen] = useState(false);
+
+  // ── Ordenação e filtros do ranking ───────────────────────────────────
+  // Correm no browser sobre o ranking já carregado: não mudam scores nem a
+  // régua, só escolhem que linhas se vêem e por que ordem. Vivem no endereço
+  // para a pesquisa poder ser guardada ou enviada.
+  const initialSort = searchParams.get('sort');
+  const [sortKey, setSortKey] = useState<SortKey>(
+    initialSort && initialSort in DEFAULT_DIR ? (initialSort as SortKey) : 'score'
+  );
+  const [sortDir, setSortDir] = useState<SortDir>(
+    searchParams.get('dir') === 'asc' || searchParams.get('dir') === 'desc'
+      ? (searchParams.get('dir') as SortDir)
+      : DEFAULT_DIR[initialSort && initialSort in DEFAULT_DIR ? (initialSort as SortKey) : 'score']
+  );
+  const [minScore, setMinScore] = useState(numParam(searchParams.get('score')));
+  const [maxAge, setMaxAge] = useState(numParam(searchParams.get('age')));
+  const [minMinutes, setMinMinutes] = useState(numParam(searchParams.get('min')));
+  const [contractBefore, setContractBefore] = useState(
+    /^\d{4}-\d{2}-\d{2}$/.test(searchParams.get('contract') ?? '') ? (searchParams.get('contract') as string) : ''
+  );
+  const [maxValue, setMaxValue] = useState(numParam(searchParams.get('value')));
+  const [hideUnknown, setHideUnknown] = useState(searchParams.get('known') === '1');
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   // Sincronizar URL sempre que mudam as selecções. Mantém ?tab= se presente.
   useEffect(() => {
@@ -80,12 +148,35 @@ export function PerfisGuardados() {
     if (tab) params.set('tab', tab);
     if (selectedProfileId) params.set('profile', selectedProfileId);
     if (selectedPoolId) params.set('pool', selectedPoolId);
+    if (sortKey !== 'score' || sortDir !== 'desc') {
+      params.set('sort', sortKey);
+      params.set('dir', sortDir);
+    }
+    if (minScore) params.set('score', minScore);
+    if (maxAge) params.set('age', maxAge);
+    if (minMinutes) params.set('min', minMinutes);
+    if (contractBefore) params.set('contract', contractBefore);
+    if (maxValue) params.set('value', maxValue);
+    if (hideUnknown) params.set('known', '1');
     const next = params.toString();
     const current = searchParams.toString();
     if (next !== current) {
       router.replace(next ? `/profiles?${next}` : '/profiles', { scroll: false });
     }
-  }, [selectedProfileId, selectedPoolId, router, searchParams]);
+  }, [
+    selectedProfileId,
+    selectedPoolId,
+    sortKey,
+    sortDir,
+    minScore,
+    maxAge,
+    minMinutes,
+    contractBefore,
+    maxValue,
+    hideUnknown,
+    router,
+    searchParams,
+  ]);
 
   const loadProfiles = useCallback(async () => {
     const res = await fetch('/api/profiles');
@@ -115,11 +206,13 @@ export function PerfisGuardados() {
     setError(null);
     setResult(null);
     setExpandedRow(null);
+    setRowDetails({});
+    setVisibleCount(PAGE_SIZE);
     try {
       const res = await fetch('/api/score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pool_id: selectedPoolId, profile_id: selectedProfileId, limit: 100 }),
+        body: JSON.stringify({ pool_id: selectedPoolId, profile_id: selectedProfileId }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Erro desconhecido');
@@ -130,6 +223,47 @@ export function PerfisGuardados() {
       setLoading(false);
     }
   }, [selectedProfileId, selectedPoolId]);
+
+  // O ranking vem de profile_scores sem o detalhe por métrica; pede-se aqui,
+  // para um jogador só, quando a linha é aberta. É o mesmo pedido que a ficha
+  // do jogador faz.
+  const toggleRow = useCallback(
+    (player: RankedPlayer) => {
+      const id = player.player_id;
+      if (expandedRow === id) {
+        setExpandedRow(null);
+        return;
+      }
+      setExpandedRow(id);
+      if (player.contributions || rowDetails[id]?.status === 'ready' || rowDetails[id]?.status === 'loading') {
+        return;
+      }
+      setRowDetails((prev) => ({ ...prev, [id]: { status: 'loading' } }));
+      fetch('/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pool_id: selectedPoolId, profile_id: selectedProfileId, player_id: id }),
+      })
+        .then(async (res) => {
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error ?? 'Erro desconhecido');
+          const found = (json.ranked ?? [])[0] as RankedPlayer | undefined;
+          if (!found?.contributions) throw new Error('Sem detalhe para este jogador.');
+          setRowDetails((prev) => ({
+            ...prev,
+            [id]: {
+              status: 'ready',
+              contributions: found.contributions ?? [],
+              missing_metrics: found.missing_metrics ?? [],
+            },
+          }));
+        })
+        .catch((err) => {
+          setRowDetails((prev) => ({ ...prev, [id]: { status: 'error', message: (err as Error).message } }));
+        });
+    },
+    [expandedRow, rowDetails, selectedPoolId, selectedProfileId]
+  );
 
   // Se chegamos à página com params + listas já carregadas, corre score automaticamente.
   // runScore = useCallback([selectedProfileId, selectedPoolId]) é estável face às
@@ -164,10 +298,96 @@ export function PerfisGuardados() {
     [loadProfiles, router]
   );
 
+  // ── Linhas a mostrar: filtrar, ordenar, cortar ────────────────────────
+  /** Posição no perfil (ordem por score), que a coluna "#" mostra sempre. */
+  const rankOf = useMemo(() => {
+    const map = new Map<string, number>();
+    (result?.ranked ?? []).forEach((p, i) => map.set(p.player_id, i + 1));
+    return map;
+  }, [result]);
+
+  const filtered = useMemo(() => {
+    if (!result) return [];
+    const scoreMin = minScore ? Number(minScore) : null;
+    const ageMax = maxAge ? Number(maxAge) : null;
+    const minutesMin = minMinutes ? Number(minMinutes) : null;
+    const valueMax = maxValue ? Number(maxValue) : null;
+
+    const rows = result.ranked.filter((p) => {
+      if (scoreMin != null && p.score < scoreMin) return false;
+      if (ageMax != null && (p.age == null || p.age > ageMax)) return false;
+      if (minutesMin != null && (p.minutes_played ?? 0) < minutesMin) return false;
+      // Contrato e valor faltam em muitos jogadores das ligas de baixo. Quem
+      // não tem o dado passa o filtro, a menos que se peça para o esconder.
+      if (contractBefore) {
+        if (p.contract_until == null) {
+          if (hideUnknown) return false;
+        } else if (p.contract_until > contractBefore) return false;
+      }
+      if (valueMax != null) {
+        const value = sortValue(p, 'value') as number | null;
+        if (value == null) {
+          if (hideUnknown) return false;
+        } else if (value > valueMax) return false;
+      }
+      return true;
+    });
+
+    const sign = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const av = sortValue(a, sortKey);
+      const bv = sortValue(b, sortKey);
+      // Sem dado vai sempre para o fim, em qualquer sentido.
+      if (av == null && bv == null) return (rankOf.get(a.player_id) ?? 0) - (rankOf.get(b.player_id) ?? 0);
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (av < bv) return -1 * sign;
+      if (av > bv) return 1 * sign;
+      // Empate: desempata pela posição no perfil.
+      return (rankOf.get(a.player_id) ?? 0) - (rankOf.get(b.player_id) ?? 0);
+    });
+  }, [result, rankOf, sortKey, sortDir, minScore, maxAge, minMinutes, contractBefore, maxValue, hideUnknown]);
+
+  const shown = filtered.slice(0, visibleCount);
+  const filtersActive =
+    Boolean(minScore || maxAge || minMinutes || contractBefore || maxValue) || hideUnknown;
+  const sortActive = sortKey !== 'score' || sortDir !== 'desc';
+
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey && key !== 'score' && sortDir !== DEFAULT_DIR[key]) {
+      // Terceiro clique na mesma coluna: volta à ordem do perfil.
+      setSortKey('score');
+      setSortDir('desc');
+    } else if (key === sortKey) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(DEFAULT_DIR[key]);
+    }
+    setVisibleCount(PAGE_SIZE);
+  };
+
+  const clearFilters = () => {
+    setMinScore('');
+    setMaxAge('');
+    setMinMinutes('');
+    setContractBefore('');
+    setMaxValue('');
+    setHideUnknown(false);
+    setSortKey('score');
+    setSortDir('desc');
+    setVisibleCount(PAGE_SIZE);
+  };
+
+  // A shortlist guarda o que está no ecrã: as linhas visíveis, depois de
+  // filtros, ordenação e corte. Antes guardava os 100 primeiros por score,
+  // estivessem ou não à vista.
   const handleSaveShortlist = useCallback(async () => {
     if (!result) return;
+    const playerIds = shown.slice(0, SHORTLIST_MAX).map((p) => p.player_id);
+    if (playerIds.length === 0) return;
     const defaultName = `${result.profile.name} · ${result.pool.name}`;
-    const name = prompt('Nome da shortlist:', defaultName);
+    const name = prompt(`Nome da shortlist (${playerIds.length} jogadores):`, defaultName);
     if (!name) return;
     const res = await fetch('/api/shortlists', {
       method: 'POST',
@@ -176,7 +396,7 @@ export function PerfisGuardados() {
         name,
         pool_id: selectedPoolId,
         profile_id: selectedProfileId,
-        limit: result.ranked.length,
+        player_ids: playerIds,
       }),
     });
     const json = await res.json();
@@ -187,7 +407,7 @@ export function PerfisGuardados() {
     if (confirm(`Shortlist "${name}" criada com ${json.shortlist.player_count} jogadores. Abrir agora?`)) {
       router.push(`/shortlists/${json.shortlist.id}`);
     }
-  }, [result, selectedPoolId, selectedProfileId, router]);
+  }, [result, shown, selectedPoolId, selectedProfileId, router]);
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
 
@@ -369,8 +589,9 @@ export function PerfisGuardados() {
                 <span className="text-neutral-700">{result.pool.name}</span>
               </div>
               <div className="mt-1 text-xs text-neutral-500">
-                {result.eligible_count} elegíveis · peer group {result.peer_group_size} · pool{' '}
-                {result.total_players_in_pool}
+                A mostrar {shown.length} de {filtered.length}
+                {filtersActive ? ' com estes filtros' : ''} · {result.eligible_count} elegíveis · peer
+                group {result.peer_group_size} · pool {result.total_players_in_pool}
               </div>
               {result.warnings.length > 0 && (
                 <ul className="mt-2 space-y-1 text-xs text-amber-700">
@@ -385,40 +606,165 @@ export function PerfisGuardados() {
               onClick={handleSaveShortlist}
               className="shrink-0 rounded-md border border-neutral-300 bg-white px-3 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
             >
-              + Guardar como shortlist
+              + Guardar {Math.min(shown.length, SHORTLIST_MAX)} como shortlist
             </button>
           </div>
+
+          {result.ranked.length > 0 && (
+            <div className="flex flex-wrap items-end gap-3 border-b border-neutral-200 px-6 py-3 text-xs">
+              {(
+                [
+                  ['Score mín.', minScore, setMinScore, '0'],
+                  ['Idade máx.', maxAge, setMaxAge, '—'],
+                  ['Minutos mín.', minMinutes, setMinMinutes, '0'],
+                  ['Valor máx. €', maxValue, setMaxValue, '—'],
+                ] as Array<[string, string, (v: string) => void, string]>
+              ).map(([label, value, setValue, placeholder]) => (
+                <label key={label} className="flex flex-col gap-1 text-neutral-500">
+                  {label}
+                  <input
+                    type="number"
+                    min={0}
+                    inputMode="numeric"
+                    value={value}
+                    placeholder={placeholder}
+                    onChange={(e) => {
+                      setValue(e.target.value);
+                      setVisibleCount(PAGE_SIZE);
+                    }}
+                    className="w-24 rounded-md border border-neutral-300 px-2 py-1 text-sm text-neutral-900"
+                  />
+                </label>
+              ))}
+              <label className="flex flex-col gap-1 text-neutral-500">
+                Contrato até
+                <input
+                  type="date"
+                  value={contractBefore}
+                  onChange={(e) => {
+                    setContractBefore(e.target.value);
+                    setVisibleCount(PAGE_SIZE);
+                  }}
+                  className="rounded-md border border-neutral-300 px-2 py-1 text-sm text-neutral-900"
+                />
+              </label>
+              <label className="flex items-center gap-2 pb-1.5 text-neutral-600">
+                <input
+                  type="checkbox"
+                  checked={hideUnknown}
+                  onChange={(e) => {
+                    setHideUnknown(e.target.checked);
+                    setVisibleCount(PAGE_SIZE);
+                  }}
+                />
+                Esconder quem não tem valor ou contrato registado
+              </label>
+              {(filtersActive || sortActive) && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="rounded-md border border-neutral-300 bg-white px-3 py-1 font-medium text-neutral-700 hover:bg-neutral-50"
+                >
+                  Repor lista inicial
+                </button>
+              )}
+            </div>
+          )}
 
           {result.ranked.length === 0 ? (
             <div className="p-6 text-sm text-neutral-600">
               Zero jogadores elegíveis. Verifica os filtros do perfil.
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="p-6 text-sm text-neutral-600">
+              Nenhum jogador passa estes filtros.
             </div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
                 <tr>
                   <th className="px-4 py-3">#</th>
-                  <th className="px-4 py-3">Score</th>
+                  <th className="px-4 py-3" aria-sort={sortKey === 'score' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                    <button
+                      type="button"
+                      onClick={() => handleSort('score')}
+                      className="flex items-center gap-1 uppercase tracking-wide hover:text-neutral-900"
+                    >
+                      Score
+                      <span className={sortKey === 'score' ? 'text-neutral-900' : 'text-neutral-300'}>
+                        {sortKey === 'score' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </button>
+                  </th>
                   <th className="px-4 py-3">Jogador</th>
                   <th className="px-4 py-3">Equipa</th>
                   <th className="px-4 py-3">Pos</th>
-                  <th className="px-4 py-3">Idade</th>
-                  <th className="px-4 py-3">Min</th>
-                  <th className="px-4 py-3">Contrato</th>
-                  <th className="px-4 py-3">Valor</th>
+                  <th className="px-4 py-3" aria-sort={sortKey === 'age' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                    <button
+                      type="button"
+                      onClick={() => handleSort('age')}
+                      className="flex items-center gap-1 uppercase tracking-wide hover:text-neutral-900"
+                    >
+                      Idade
+                      <span className={sortKey === 'age' ? 'text-neutral-900' : 'text-neutral-300'}>
+                        {sortKey === 'age' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </button>
+                  </th>
+                  <th className="px-4 py-3" aria-sort={sortKey === 'minutes' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                    <button
+                      type="button"
+                      onClick={() => handleSort('minutes')}
+                      className="flex items-center gap-1 uppercase tracking-wide hover:text-neutral-900"
+                    >
+                      Min
+                      <span className={sortKey === 'minutes' ? 'text-neutral-900' : 'text-neutral-300'}>
+                        {sortKey === 'minutes' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </button>
+                  </th>
+                  <th className="px-4 py-3" aria-sort={sortKey === 'contract' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                    <button
+                      type="button"
+                      onClick={() => handleSort('contract')}
+                      className="flex items-center gap-1 uppercase tracking-wide hover:text-neutral-900"
+                    >
+                      Contrato
+                      <span className={sortKey === 'contract' ? 'text-neutral-900' : 'text-neutral-300'}>
+                        {sortKey === 'contract' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </button>
+                  </th>
+                  <th className="px-4 py-3" aria-sort={sortKey === 'value' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                    <button
+                      type="button"
+                      onClick={() => handleSort('value')}
+                      className="flex items-center gap-1 uppercase tracking-wide hover:text-neutral-900"
+                    >
+                      Valor
+                      <span className={sortKey === 'value' ? 'text-neutral-900' : 'text-neutral-300'}>
+                        {sortKey === 'value' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {result.ranked.flatMap((p, i) => {
+                {shown.flatMap((p) => {
                   const expanded = expandedRow === p.player_id;
+                  const fetched = rowDetails[p.player_id];
+                  const contributions =
+                    p.contributions ?? (fetched?.status === 'ready' ? fetched.contributions : null);
+                  const missingMetrics =
+                    p.missing_metrics ?? (fetched?.status === 'ready' ? fetched.missing_metrics : []);
                   const rows = [
                     <tr
                       key={p.player_id}
-                      onClick={() => setExpandedRow(expanded ? null : p.player_id)}
+                      onClick={() => toggleRow(p)}
                       className={`cursor-pointer border-t border-neutral-100 hover:bg-neutral-50 ${expanded ? 'bg-neutral-50' : ''
                         }`}
                     >
-                      <td className="px-4 py-3 text-neutral-500">{i + 1}</td>
+                      <td className="px-4 py-3 text-neutral-500">{rankOf.get(p.player_id)}</td>
                       <td className="px-4 py-3 font-semibold">{p.score.toFixed(1)}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
@@ -454,6 +800,14 @@ export function PerfisGuardados() {
                           <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
                             Breakdown por métrica
                           </div>
+                          {!contributions ? (
+                            <p className="mt-2 text-xs text-neutral-500">
+                              {fetched?.status === 'error'
+                                ? `Não foi possível carregar o detalhe: ${fetched.message}`
+                                : 'A carregar detalhe…'}
+                            </p>
+                          ) : (
+                          <>
                           <table className="mt-2 w-full text-xs">
                             <thead className="text-left text-neutral-500">
                               <tr>
@@ -465,7 +819,7 @@ export function PerfisGuardados() {
                               </tr>
                             </thead>
                             <tbody>
-                              {p.contributions.map((c) => (
+                              {contributions.map((c) => (
                                 <tr key={c.metric_code} className="border-t border-neutral-200">
                                   <td className="py-1 pr-4 font-mono text-neutral-700">
                                     {c.metric_code}
@@ -496,10 +850,12 @@ export function PerfisGuardados() {
                               ))}
                             </tbody>
                           </table>
-                          {p.missing_metrics.length > 0 && (
+                          {missingMetrics.length > 0 && (
                             <p className="mt-2 text-xs text-amber-700">
-                              Métricas em falta: {p.missing_metrics.join(', ')}
+                              Métricas em falta: {missingMetrics.join(', ')}
                             </p>
+                          )}
+                          </>
                           )}
                         </td>
                       </tr>
@@ -509,6 +865,25 @@ export function PerfisGuardados() {
                 })}
               </tbody>
             </table>
+          )}
+
+          {filtered.length > shown.length && (
+            <div className="flex items-center justify-center gap-4 border-t border-neutral-200 px-6 py-3 text-sm">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+                className="rounded-md border border-neutral-300 bg-white px-3 py-1 font-medium text-neutral-700 hover:bg-neutral-50"
+              >
+                Mostrar mais {Math.min(PAGE_SIZE, filtered.length - shown.length)}
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisibleCount(filtered.length)}
+                className="text-neutral-500 underline hover:text-neutral-900"
+              >
+                Mostrar todos ({filtered.length})
+              </button>
+            </div>
           )}
         </section>
       )}

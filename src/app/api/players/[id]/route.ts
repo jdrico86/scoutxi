@@ -120,10 +120,12 @@ export async function GET(_: NextRequest, { params }: Params) {
     }
   }
 
-  // 6. Perfis aplicáveis
+  // 6. Perfis aplicáveis — só os seed (sem dono) e os do utilizador actual,
+  //    a mesma regra do GET /api/profiles. Antes vinham os de toda a gente.
   const { data: allProfiles } = await supabase
     .from('scouting_profiles')
     .select('*')
+    .or(`owner_id.is.null,owner_id.eq.${user.id}`)
     .order('name');
 
   // Um perfil é aplicável se aceitar QUALQUER posição do jogador, primária ou

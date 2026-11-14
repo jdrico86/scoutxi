@@ -5,6 +5,7 @@ import { loadPoolData, profileRowToProfile } from '@/lib/scouting/db-helpers';
 import { matchesPositions } from '@/lib/scouting/positions';
 import { recalculateProfileScores } from '@/lib/scouting/recalculate-scores';
 import { scoreProfile } from '@/lib/scouting/scorer';
+import { getAuthUser } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -34,6 +35,9 @@ type TeamPlayer = {
 
 // GET /api/teams?pool=...&team=...&min_age=&max_age=&min_minutes=
 export async function GET(req: NextRequest) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'Env vars em falta.' }, { status: 500 });
@@ -101,10 +105,13 @@ export async function GET(req: NextRequest) {
   for (const p of [...(periodRes.data ?? []), ...(legacyRes.data ?? [])]) byId.set(p.id, p);
   const teamPlayers = Array.from(byId.values());
 
-  // 3. Perfis (todos)
+  // 3. Perfis que este utilizador pode ver: os seed (sem dono) e os seus.
+  //    Até 14/11/2026 vinham todos, e os perfis de um utilizador apareciam nos
+  //    plantéis vistos por outro. É a mesma regra do GET /api/profiles.
   const { data: allProfiles } = await supabase
     .from('scouting_profiles')
     .select('*')
+    .or(`owner_id.is.null,owner_id.eq.${user.id}`)
     .order('name');
 
   // 4. Scores — lidos de profile_scores, não recalculados.

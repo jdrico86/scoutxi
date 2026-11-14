@@ -16,12 +16,16 @@ export const maxDuration = 60;
  *   - Manual: só `name`. Cria shortlist vazia, sem perfil/pool.
  *   - Gerada por perfil: `name` + `pool_id` + `profile_id` (+ optional `limit`).
  *     Aplica scoring e popula com top N jogadores.
+ *   - Selecção: `name` + `pool_id` + `profile_id` + `player_ids`. Guarda
+ *     exactamente esses jogadores, pela ordem recebida — é o que o separador
+ *     Perfis envia: as linhas que estão no ecrã, depois de filtros e ordenação.
  */
 const CreateShortlistSchema = z.object({
   name: z.string().min(1).max(200),
   pool_id: z.string().uuid().optional(),
   profile_id: z.string().uuid().optional(),
   limit: z.number().int().positive().max(200).optional(),
+  player_ids: z.array(z.string().uuid()).min(1).max(200).optional(),
 });
 
 // ── GET /api/shortlists ──────────────────────────────────────────────────
@@ -111,6 +115,64 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: 'Para gerar por perfil, ambos `pool_id` e `profile_id` são obrigatórios.' },
       { status: 400 }
+    );
+  }
+
+  // ── Modo selecção: guarda os jogadores indicados ───────────────────
+  //    O score e a posição no perfil vêm de profile_scores — não é preciso
+  //    recalcular a pool, que era o que tornava este botão lento.
+  if (body.player_ids) {
+    const playerIds = Array.from(new Set(body.player_ids));
+
+    const { data: scoreRows, error: scoresErr } = await supabase
+      .from('profile_scores')
+      .select('player_id, score, rank')
+      .eq('pool_id', body.pool_id)
+      .eq('profile_id', body.profile_id)
+      .in('player_id', playerIds);
+    if (scoresErr) return NextResponse.json({ error: scoresErr.message }, { status: 500 });
+    const scoreByPlayer = new Map((scoreRows ?? []).map((r) => [r.player_id, r]));
+
+    // Só jogadores que existem nesta pool.
+    const { data: validRows, error: validErr } = await supabase
+      .from('players')
+      .select('id')
+      .eq('pool_id', body.pool_id)
+      .in('id', playerIds);
+    if (validErr) return NextResponse.json({ error: validErr.message }, { status: 500 });
+    const valid = new Set((validRows ?? []).map((r) => r.id));
+    const kept = playerIds.filter((id) => valid.has(id));
+    if (kept.length === 0) {
+      return NextResponse.json({ error: 'Nenhum dos jogadores pertence a esta pool.' }, { status: 400 });
+    }
+
+    const { data: createdSel, error: createSelErr } = await supabase
+      .from('shortlists')
+      .insert({ name: body.name, pool_id: body.pool_id, profile_id: body.profile_id, owner_id: user.id })
+      .select('id, name, created_at')
+      .single();
+    if (createSelErr || !createdSel) {
+      return NextResponse.json(
+        { error: `Falha a criar shortlist: ${createSelErr?.message ?? 'desconhecido'}` },
+        { status: 500 }
+      );
+    }
+
+    const selRows = kept.map((id) => ({
+      shortlist_id: createdSel.id,
+      player_id: id,
+      snapshot_score: scoreByPlayer.get(id)?.score ?? null,
+      snapshot_rank: scoreByPlayer.get(id)?.rank ?? null,
+    }));
+    const { error: selErr } = await supabase.from('shortlist_players').insert(selRows);
+    if (selErr) {
+      await supabase.from('shortlists').delete().eq('id', createdSel.id);
+      return NextResponse.json({ error: `Falha a adicionar jogadores: ${selErr.message}` }, { status: 500 });
+    }
+
+    return NextResponse.json(
+      { ok: true, shortlist: { ...createdSel, player_count: selRows.length } },
+      { status: 201 }
     );
   }
 

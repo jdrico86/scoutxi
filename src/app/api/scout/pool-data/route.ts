@@ -92,6 +92,7 @@ export async function GET(req: NextRequest) {
       .from('players')
       .select('id, name, current_team, team_in_period, position_primary, positions_secondary, age, minutes_played, on_loan, contract_until, market_value_eur')
       .eq('pool_id', poolId)
+      .order('id')
       .range(from, from + PAGE - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (!page || page.length === 0) break;
@@ -108,6 +109,7 @@ export async function GET(req: NextRequest) {
       .from('player_stats')
       .select('player_id, metric_code, metric_value, players!inner(pool_id)')
       .eq('players.pool_id', poolId)
+      .order('player_id').order('metric_code')
       .range(sFrom, sFrom + PAGE - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (!page || page.length === 0) break;

@@ -18,7 +18,7 @@ export async function GET() {
   const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
   const { data, error } = await supabase
     .from('pools')
-    .select('id, name, season, competition, country, tier');
+    .select('id, name, season, competition, country, tier, competition_key, in_pyramid');
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({ pools: [...(data ?? [])].sort(comparePools) });

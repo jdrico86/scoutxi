@@ -10,16 +10,17 @@
  * Deduplicação:
  * - O Wyscout por vezes exporta linhas duplicadas para o mesmo jogador com
  *   dados ligeiramente diferentes — provavelmente um glitch do exporter.
- *   Antes de processar, deduplicamos por nome + equipa + altura + pé
- *   (lib/wyscout/player-key.ts, a mesma chave da rota de import), ficando
- *   com a linha de mais minutos. A idade não entra: muda entre exports.
- *   Casos como "Diogo Marques" no Lagoa vs FC Serpa (jogadores diferentes
- *   ou transferência) NÃO são afectados — clubes diferentes mantêm linhas
- *   separadas.
+ *   Antes de processar, deduplicamos por nome + equipa por quem joga nesta
+ *   competição + altura + pé (lib/wyscout/player-key.ts, a mesma regra da rota
+ *   de import), ficando com a linha de mais minutos. A idade não entra na
+ *   chave (muda entre exports); só separa homónimos com mais de um ano de
+ *   diferença. Casos como "Diogo Marques" no Lagoa vs FC Serpa (jogadores
+ *   diferentes ou transferência) NÃO são afectados — equipas diferentes
+ *   mantêm linhas separadas.
  */
 import * as XLSX from 'xlsx';
 import { METRIC_MAP, PLAYER_FIELD_MAP, toNumberOrNull } from './column-map';
-import { playerKey } from './player-key';
+import { agesCompatible, periodTeam, playerKey } from './player-key';
 
 export type ParsedPlayer = {
   // índice de linha no XLSX (1-based, excluindo header), útil para debug
@@ -46,7 +47,7 @@ export type ParseResult = {
   warnings: string[];
   unmappedColumns: string[]; // colunas que existiam no XLSX e que ignorámos
   missingColumns: string[]; // colunas que o parser espera e não encontrou
-  duplicatesRemoved: number; // linhas removidas por deduplicação (nome+equipa+altura+pé)
+  duplicatesRemoved: number; // linhas removidas por deduplicação (nome+equipa do período+altura+pé)
 };
 
 /** Lê buffer de ficheiro XLSX e devolve estruturas prontas para persistência. */
@@ -93,12 +94,18 @@ export function parseWyscoutXlsx(buffer: ArrayBuffer | Buffer): ParseResult {
   const unmappedColumns = [...presentColumns].filter((c) => !expectedColumns.has(c));
 
   // ── Deduplicação ─────────────────────────────────────────────────────
-  // Agrupa linhas por (nome, equipa, altura, pé) e fica com a linha de mais minutos.
-  // O Wyscout às vezes exporta duplicados com a mesma chave mas dados ligeiramente
-  // diferentes (provavelmente bug do exporter). Esta dedup acontece ANTES de
-  // criar players/stats, garantindo um único registo por jogador no resultado.
+  // Agrupa linhas por (nome, equipa do período, altura, pé) e fica com a linha
+  // de mais minutos. O Wyscout às vezes exporta duplicados com a mesma chave mas
+  // dados ligeiramente diferentes (provavelmente bug do exporter). Mesma chave
+  // com idades a mais de um ano de distância são homónimos e ficam os dois.
+  // Esta dedup acontece ANTES de criar players/stats, garantindo um único
+  // registo por jogador no resultado.
   type IndexedRow = { row: Record<string, unknown>; rowIndex: number };
-  const dedupMap = new Map<string, IndexedRow>();
+  type Slot = IndexedRow & { key: string };
+  const teamOf = (r: Record<string, unknown>) =>
+    periodTeam(r['Equipa dentro de um período de tempo seleccionado'], r['Equipa']);
+  const slots: Slot[] = [];
+  const slotsByKey = new Map<string, Slot[]>();
   let duplicatesRemoved = 0;
 
   rows.forEach((row, i) => {
@@ -106,18 +113,18 @@ export function parseWyscoutXlsx(buffer: ArrayBuffer | Buffer): ParseResult {
     const name = String(row['Jogador'] ?? '').trim();
     if (!name) return; // linhas vazias ignoradas no loop principal a seguir
 
-    // Mesma chave que a rota de import: nome + equipa + altura + pé, com a
-    // equipa do período como recurso quando 'Equipa' vem vazia.
-    const team =
-      String(row['Equipa'] ?? '').trim() ||
-      String(row['Equipa dentro de um período de tempo seleccionado'] ?? '').trim();
+    // Mesma regra que a rota de import — lib/wyscout/player-key.ts.
+    const team = teamOf(row);
     const key = playerKey(name, team, row['Altura'], row['Pé']);
 
     const minutesNow = toNumberOrNull(row['Minutos jogados:']) ?? 0;
 
-    const existing = dedupMap.get(key);
+    const sameKey = slotsByKey.get(key) ?? [];
+    const existing = sameKey.find((s) => agesCompatible(s.row['Idade'], row['Idade']));
     if (!existing) {
-      dedupMap.set(key, { row, rowIndex });
+      const slot: Slot = { key, row, rowIndex };
+      slots.push(slot);
+      slotsByKey.set(key, [...sameKey, slot]);
       return;
     }
 
@@ -125,14 +132,15 @@ export function parseWyscoutXlsx(buffer: ArrayBuffer | Buffer): ParseResult {
     const minutesExisting = toNumberOrNull(existing.row['Minutos jogados:']) ?? 0;
     if (minutesNow > minutesExisting) {
       // Esta linha tem mais minutos — substituir
-      dedupMap.set(key, { row, rowIndex });
       warnings.push(
-        `Duplicado removido: linha ${existing.rowIndex} (${minutesExisting} min) substituída por linha ${rowIndex} (${minutesNow} min) — ${name} / ${row['Equipa'] ?? '—'}.`
+        `Duplicado removido: linha ${existing.rowIndex} (${minutesExisting} min) substituída por linha ${rowIndex} (${minutesNow} min) — ${name} / ${team || '—'}.`
       );
+      existing.row = row;
+      existing.rowIndex = rowIndex;
     } else {
       // Esta linha tem menos ou iguais minutos — descartar
       warnings.push(
-        `Duplicado removido: linha ${rowIndex} (${minutesNow} min) descartada — ${name} / ${row['Equipa'] ?? '—'} (mantida linha ${existing.rowIndex} com ${minutesExisting} min).`
+        `Duplicado removido: linha ${rowIndex} (${minutesNow} min) descartada — ${name} / ${team || '—'} (mantida linha ${existing.rowIndex} com ${minutesExisting} min).`
       );
     }
   });
@@ -147,39 +155,38 @@ export function parseWyscoutXlsx(buffer: ArrayBuffer | Buffer): ParseResult {
   const ghostKey = (r: Record<string, unknown>) =>
     [
       String(r['Jogador'] ?? '').trim().toLowerCase(),
-      (
-        String(r['Equipa'] ?? '').trim() ||
-        String(r['Equipa dentro de um período de tempo seleccionado'] ?? '').trim()
-      ).toLowerCase(),
+      teamOf(r).toLowerCase(),
       String(r['Idade'] ?? '').trim(),
       String(r['Posição'] ?? '').split(',')[0].trim(),
     ].join('::');
-  const byGhostKey = new Map<string, Array<[string, IndexedRow]>>();
-  for (const entry of dedupMap.entries()) {
-    const k = ghostKey(entry[1].row);
+  const byGhostKey = new Map<string, Slot[]>();
+  for (const slot of slots) {
+    const k = ghostKey(slot.row);
     const list = byGhostKey.get(k);
-    if (list) list.push(entry);
-    else byGhostKey.set(k, [entry]);
+    if (list) list.push(slot);
+    else byGhostKey.set(k, [slot]);
   }
+  const ghosts = new Set<Slot>();
   for (const group of byGhostKey.values()) {
     if (group.length !== 2) continue;
     const [a, b] = group;
-    if (hasHeight(a[1].row) === hasHeight(b[1].row)) continue; // dois jogadores a sério
-    const full = hasHeight(a[1].row) ? a : b;
+    if (hasHeight(a.row) === hasHeight(b.row)) continue; // dois jogadores a sério
+    const full = hasHeight(a.row) ? a : b;
     const ghost = full === a ? b : a;
-    const minutes = (e: [string, IndexedRow]) => toNumberOrNull(e[1].row['Minutos jogados:']) ?? 0;
+    const minutes = (s: Slot) => toNumberOrNull(s.row['Minutos jogados:']) ?? 0;
     const keep = minutes(ghost) > minutes(full) ? ghost : full;
-    const merged: Record<string, unknown> = { ...keep[1].row, Altura: full[1].row['Altura'], Pé: full[1].row['Pé'] };
-    dedupMap.delete(ghost[0]);
-    dedupMap.set(full[0], { row: merged, rowIndex: keep[1].rowIndex });
+    const lines = `${a.rowIndex} e ${b.rowIndex}`;
+    full.row = { ...keep.row, Altura: full.row['Altura'], Pé: full.row['Pé'] };
+    full.rowIndex = keep.rowIndex;
+    ghosts.add(ghost);
     duplicatesRemoved++;
     warnings.push(
-      `Ficha fantasma fundida: ${String(merged['Jogador'])} / ${String(merged['Equipa'] ?? '—')} (linhas ${a[1].rowIndex} e ${b[1].rowIndex}).`
+      `Ficha fantasma fundida: ${String(full.row['Jogador'])} / ${teamOf(full.row) || '—'} (linhas ${lines}).`
     );
   }
 
   // Lista deduplicada, ordenada por rowIndex original
-  const dedupedRows = Array.from(dedupMap.values()).sort((a, b) => a.rowIndex - b.rowIndex);
+  const dedupedRows = slots.filter((s) => !ghosts.has(s)).sort((a, b) => a.rowIndex - b.rowIndex);
 
   // ── Processar linhas (já deduplicadas) ───────────────────────────────
   dedupedRows.forEach(({ row, rowIndex }) => {

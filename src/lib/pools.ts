@@ -36,7 +36,32 @@ export type PoolOption = {
   competition?: string | null;
   country?: string | null;
   tier?: number | null;
+  /** Código estável da competição; não muda quando o nome muda. */
+  competition_key?: string | null;
+  /** Falso para competições fora da pirâmide de escalões (sub-23, taças). */
+  in_pyramid?: boolean | null;
 };
+
+/**
+ * Identifica a competição entre épocas. Usa o código guardado na pool; sem
+ * código, recorre a país + nome. É por aqui que a Liga Revelação de 25/26 e a
+ * Liga NextGen de 26/27 contam como a mesma prova.
+ */
+export function competitionId(p: PoolOption): string {
+  const key = p.competition_key?.trim();
+  if (key) return key;
+  return `${(p.country ?? '').trim().toLowerCase()}|${competitionLabel(p).toLowerCase()}`;
+}
+
+/** Gera um código a partir do país e do nome: ("Portugal", "Liga 3") → "portugal-liga-3". */
+export function slugifyCompetition(country: string, name: string): string {
+  return `${country} ${name}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
 
 /** Grupo para pools sem país preenchido. */
 export const NO_COUNTRY = 'Outros';
@@ -86,4 +111,27 @@ export function groupPoolsByCountry(
     else groups.set(key, [p]);
   }
   return Array.from(groups, ([country, list]) => ({ country, pools: list }));
+}
+
+/**
+ * Época já terminada: o dia a que as idades devem dizer respeito e quantos anos
+ * passaram desde então.
+ *
+ * Num export de uma época passada o Wyscout escreve a idade que o jogador tem
+ * HOJE. A importação acerta-a para o fim da época (30 de Junho) e regista esse
+ * dia em `pools.reference_date`, que a ligação entre épocas usa para estimar o
+ * ano de nascimento. Para a época em curso devolve `null`: vale a data da
+ * importação.
+ *
+ * "21/22" a 15/11/2026 → { date: "2022-06-30", years: 4 }.
+ */
+export function pastSeasonReference(season: string, today: Date = new Date()): { date: string; years: number } | null {
+  const m = /^(\d{2})\/(\d{2})$/.exec(season.trim());
+  if (!m) return null;
+  const endYear = 2000 + Number(m[2]);
+  const end = new Date(Date.UTC(endYear, 5, 30));
+  if (end.getTime() >= today.getTime()) return null;
+  let years = today.getUTCFullYear() - endYear;
+  if (today.getUTCMonth() < 5 || (today.getUTCMonth() === 5 && today.getUTCDate() < 30)) years -= 1;
+  return { date: `${endYear}-06-30`, years };
 }

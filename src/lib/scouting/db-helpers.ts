@@ -75,6 +75,10 @@ export async function loadPoolData(
         'id, name, current_team, position_primary, positions_secondary, age, minutes_played, contract_until, market_value_eur, on_loan'
       )
       .eq('pool_id', poolId)
+      // Ordem estável em todas as leituras paginadas: sem ela o Postgres pode devolver as
+      // linhas por outra ordem em cada página, e a paginação salta ou repete linhas
+      // (percentis da Liga Portugal 22/23 calculados com metade dos jogadores, 15/11/2026).
+      .order('id')
       .range(playersFrom, playersFrom + PLAYERS_PAGE - 1);
     if (playersErr) throw playersErr;
     if (!page || page.length === 0) break;
@@ -92,6 +96,7 @@ export async function loadPoolData(
       .from('player_stats')
       .select('player_id, metric_code, metric_value, players!inner(pool_id)')
       .eq('players.pool_id', poolId)
+      .order('player_id').order('metric_code')
       .range(from, from + PAGE - 1);
     if (error) throw error;
     if (!page || page.length === 0) break;

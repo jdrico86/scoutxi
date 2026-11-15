@@ -92,6 +92,69 @@ export type Database = {
         }
         Relationships: []
       }
+      player_snapshots: {
+        Row: {
+          age: number | null
+          games_played: number | null
+          import_id: string
+          minutes_played: number | null
+          player_id: string
+          position_primary: string | null
+          stats: Json
+          team: string | null
+        }
+        Insert: {
+          age?: number | null
+          games_played?: number | null
+          import_id: string
+          minutes_played?: number | null
+          player_id: string
+          position_primary?: string | null
+          stats?: Json
+          team?: string | null
+        }
+        Update: {
+          age?: number | null
+          games_played?: number | null
+          import_id?: string
+          minutes_played?: number | null
+          player_id?: string
+          position_primary?: string | null
+          stats?: Json
+          team?: string | null
+        }
+        Relationships: []
+      }
+      pool_imports: {
+        Row: {
+          file_name: string | null
+          id: string
+          imported_at: string
+          label: string | null
+          players_count: number
+          pool_id: string
+          snapshot_date: string
+        }
+        Insert: {
+          file_name?: string | null
+          id?: string
+          imported_at?: string
+          label?: string | null
+          players_count?: number
+          pool_id: string
+          snapshot_date: string
+        }
+        Update: {
+          file_name?: string | null
+          id?: string
+          imported_at?: string
+          label?: string | null
+          players_count?: number
+          pool_id?: string
+          snapshot_date?: string
+        }
+        Relationships: []
+      }
       player_notes: {
         Row: {
           contact_info: Json | null
@@ -351,11 +414,14 @@ export type Database = {
       pools: {
         Row: {
           competition: string | null
+          competition_key: string | null
           country: string | null
           created_at: string | null
           file_name: string | null
           id: string
+          in_pyramid: boolean
           last_imported_at: string | null
+          reference_date: string | null
           name: string
           notes: string | null
           owner: string | null
@@ -365,11 +431,14 @@ export type Database = {
         }
         Insert: {
           competition?: string | null
+          competition_key?: string | null
           country?: string | null
           created_at?: string | null
           file_name?: string | null
           id?: string
+          in_pyramid?: boolean
           last_imported_at?: string | null
+          reference_date?: string | null
           name: string
           notes?: string | null
           owner?: string | null
@@ -379,11 +448,14 @@ export type Database = {
         }
         Update: {
           competition?: string | null
+          competition_key?: string | null
           country?: string | null
           created_at?: string | null
           file_name?: string | null
           id?: string
+          in_pyramid?: boolean
           last_imported_at?: string | null
+          reference_date?: string | null
           name?: string
           notes?: string | null
           owner?: string | null
@@ -651,6 +723,13 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      snapshot_pool: {
+        Args: { p_pool_id: string; p_date?: string; p_label?: string; p_file_name?: string }
+        Returns: {
+          import_id: string
+          players: number
+        }[]
+      }
       link_player_identities: {
         Args: Record<PropertyKey, never>
         Returns: {

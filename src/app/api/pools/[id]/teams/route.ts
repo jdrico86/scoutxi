@@ -35,6 +35,7 @@ export async function GET(_: NextRequest, { params }: Params) {
       .from('players')
       .select('team_in_period, current_team')
       .eq('pool_id', id)
+      .order('id')
       .range(from, from + PAGE - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (!page || page.length === 0) break;

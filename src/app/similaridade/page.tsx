@@ -959,7 +959,7 @@ function SimilaridadeContent() {
                 onCompare={(id) =>
                   anchor &&
                   router.push(
-                    `/similaridade/comparar?a=${encodeURIComponent(anchor.player_id)}&b=${encodeURIComponent(id)}`
+                    `/comparar?a=${encodeURIComponent(anchor.player_id)}&b=${encodeURIComponent(id)}`
                   )
                 }
               />

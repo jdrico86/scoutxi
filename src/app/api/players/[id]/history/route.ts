@@ -15,6 +15,10 @@ type SeasonEntry = {
   competition: string;
   country: string | null;
   tier: number | null;
+  /** Código estável da competição: a mesma prova entre épocas, mesmo que mude de nome. */
+  competition_key: string | null;
+  /** Falso para ligas fora da pirâmide (sub-23): mudar para lá não é subir nem descer. */
+  in_pyramid: boolean;
   team: string | null;
   position_primary: string | null;
   age: number | null;
@@ -88,7 +92,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const { data: pools } = await supabase
     .from('pools')
-    .select('id, name, season, competition, country, tier');
+    .select('id, name, season, competition, country, tier, competition_key, in_pyramid');
   type PoolRow = {
     id: string;
     name: string;
@@ -96,6 +100,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     competition: string | null;
     country: string | null;
     tier: number | null;
+    competition_key: string | null;
+    in_pyramid: boolean | null;
   };
   const poolById = new Map(((pools ?? []) as PoolRow[]).map((p) => [p.id, p]));
   const latestSeason = ((pools ?? []) as PoolRow[]).map((p) => p.season).sort().pop() ?? null;
@@ -175,6 +181,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         competition: pool.competition ?? pool.name,
         country: pool.country,
         tier: pool.tier,
+        competition_key: pool.competition_key,
+        in_pyramid: pool.in_pyramid !== false,
         team: r.team_in_period ?? r.current_team,
         position_primary: r.position_primary,
         via_position: viaPositionOf(r),

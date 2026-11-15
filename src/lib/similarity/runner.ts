@@ -164,6 +164,7 @@ export async function runSimilarityQuery(
       .in('pool_id', query.target_pools)
       .in('position', allowedPositions)
       .neq('player_id', query.anchor.player_id)
+      .order('player_id').order('position').order('metric_code')
       .range(from, from + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;

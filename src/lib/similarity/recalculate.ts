@@ -54,6 +54,7 @@ export async function recalculatePoolPercentiles(supabase: SupabaseClient<any>, 
         .from('players')
         .select('id, position_primary, positions_secondary, minutes_played')
         .eq('pool_id', poolId)
+        .order('id')
         .range(from, from + PAGE - 1);
       if (error) throw error;
       if (!data || data.length === 0) break;
@@ -73,6 +74,7 @@ export async function recalculatePoolPercentiles(supabase: SupabaseClient<any>, 
         .from('player_stats')
         .select('player_id, metric_code, metric_value, players!inner(pool_id)')
         .eq('players.pool_id', poolId)
+        .order('player_id').order('metric_code')
         .range(from, from + PAGE - 1);
       if (error) throw error;
       if (!data || data.length === 0) break;

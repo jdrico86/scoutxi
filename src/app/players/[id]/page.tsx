@@ -2,11 +2,12 @@
 
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Plus, Search, FileText, Pencil, UserSearch } from 'lucide-react';
+import { Plus, Search, FileText, Pencil, UserSearch } from 'lucide-react';
 import { FavoriteStar } from '@/components/FavoriteStar';
 import { ShortlistMenu } from '@/components/ShortlistMenu';
 import { AddToSquadMenu } from '@/components/AddToSquadMenu';
 import { PlayerEvolution, usePlayerHistory, type SeasonEntry } from '@/components/PlayerEvolution';
+import { Radar } from '@/components/Radar';
 import { formatPoolName } from '@/lib/pools';
 
 type Player = {
@@ -88,35 +89,6 @@ type SearchHit = {
   pool_name: string | null;
 };
 
-type CompareResult = {
-  same_pool: boolean;
-  profile: { id: string; name: string; description: string | null };
-  player_a: {
-    id: string;
-    name: string;
-    current_team: string | null;
-    position_primary: string | null;
-    pool_name: string | null;
-    score: number;
-    rank: number;
-    total_eligible: number;
-    contributions: Contribution[];
-    missing_metrics: string[];
-  };
-  player_b: {
-    id: string;
-    name: string;
-    current_team: string | null;
-    position_primary: string | null;
-    pool_name: string | null;
-    score: number;
-    rank: number;
-    total_eligible: number;
-    contributions: Contribution[];
-    missing_metrics: string[];
-  };
-};
-
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   tracking: { label: 'A acompanhar', color: 'bg-blue-100 text-blue-800' },
   scouted: { label: 'Visto em jogo', color: 'bg-purple-100 text-purple-800' },
@@ -157,9 +129,6 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
   const [breakdownLoading, setBreakdownLoading] = useState(false);
 
   const [compareOpen, setCompareOpen] = useState(false);
-  const [compareData, setCompareData] = useState<CompareResult | null>(null);
-  const [compareLoading, setCompareLoading] = useState(false);
-  const [compareError, setCompareError] = useState<string | null>(null);
 
   const [editingNote, setEditingNote] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
@@ -203,7 +172,6 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
   useEffect(() => {
     setLoading(true);
     setError(null);
-    setCompareData(null);
     setCompareOpen(false);
     setBreakdown(null);
     setOtherOpen(false);
@@ -235,7 +203,6 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
   }, [id]);
 
   useEffect(() => {
-    if (compareData) return;
     if (!selectedProfileId || !data?.pool) {
       setBreakdown(null);
       return;
@@ -268,40 +235,18 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
         }
       })
       .finally(() => setBreakdownLoading(false));
-  }, [selectedProfileId, data?.pool, id, compareData]);
+  }, [selectedProfileId, data?.pool, id]);
 
+  // A comparação vive numa página só (/comparar); a ficha abre-a já com o
+  // perfil que se estava a ver.
   const onCompareWith = useCallback(
-    async (secondPlayerId: string) => {
-      if (!selectedProfileId) return;
-      setCompareLoading(true);
-      setCompareError(null);
-      try {
-        const res = await fetch('/api/players/compare', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            player_a_id: id,
-            player_b_id: secondPlayerId,
-            profile_id: selectedProfileId,
-          }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error);
-        setCompareData(json);
-        setCompareOpen(false);
-      } catch (e) {
-        setCompareError((e as Error).message);
-      } finally {
-        setCompareLoading(false);
-      }
+    (secondPlayerId: string) => {
+      const params = new URLSearchParams({ a: id, b: secondPlayerId });
+      if (selectedProfileId) params.set('profile', selectedProfileId);
+      router.push(`/comparar?${params.toString()}`);
     },
-    [id, selectedProfileId]
+    [id, selectedProfileId, router]
   );
-
-  const exitCompare = () => {
-    setCompareData(null);
-    setCompareError(null);
-  };
 
   if (loading) {
     return <div className="p-10 text-sm text-neutral-500">A carregar…</div>;
@@ -441,10 +386,7 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                     {statusInfo.label}
                   </span>
                 )}
-                {!compareData && (
-                  <FavoriteStar playerId={id} size="lg" className="p-1.5" />
-                )}
-                {!compareData && (
+                <FavoriteStar playerId={id} size="lg" className="p-1.5" />
                   <ShortlistMenu
                     playerId={id}
                     currentShortlistIds={shortlists.map((s) => s.shortlist_id)}
@@ -457,10 +399,8 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                         });
                     }}
                   />
-                )}
-                {!compareData && <AddToSquadMenu playerId={id} />}
-                {!compareData && (
-                  <>
+                <AddToSquadMenu playerId={id} />
+                <>
                     <button
                       type="button"
                       onClick={() => {
@@ -498,18 +438,7 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
                         Encontrar parecidos
                       </button>
                     )}
-                  </>
-                )}
-                {compareData && (
-                  <button
-                    type="button"
-                    onClick={exitCompare}
-                    className="flex items-center gap-1.5 rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
-                  >
-                    <X className="h-3.5 w-3.5" strokeWidth={2} />
-                    Remover comparação
-                  </button>
-                )}
+                </>
               </div>
             </div>
 
@@ -529,34 +458,19 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
             </div>
           </div>
 
-          {compareOpen && !compareData && (
+          {compareOpen && (
             <CompareSearchBar
               excludeId={id}
               onPick={onCompareWith}
-              loading={compareLoading}
+              loading={false}
               onCancel={() => setCompareOpen(false)}
               currentProfileName={selectedProfile?.profile_name ?? null}
             />
           )}
 
-          {compareError && (
-            <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-              {compareError}
-              <button
-                type="button"
-                onClick={() => setCompareError(null)}
-                className="ml-2 text-xs underline"
-              >
-                Limpar
-              </button>
-            </div>
-          )}
         </header>
 
-        {compareData ? (
-          <CompareView data={compareData} />
-        ) : (
-          <>
+        <>
           <section className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
             <div className="rounded-lg border border-neutral-200 bg-white lg:col-span-2">
               <div className="border-b border-neutral-200 px-4 py-3">
@@ -717,10 +631,8 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
           </section>
 
           <PlayerEvolution data={history.data} error={history.error} />
-          </>
-        )}
+        </>
 
-        {!compareData && (
           <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div className="rounded-lg border border-neutral-200 bg-white p-5">
               <div className="mb-2 flex items-center justify-between">
@@ -833,7 +745,6 @@ export default function PlayerDetailPage({ params }: { params: Promise<{ id: str
               </div>
             )}
           </section>
-        )}
       </div>
     </div>
   );
@@ -888,7 +799,7 @@ function CompareSearchBar({
         <div>
           <h3 className="text-sm font-semibold text-neutral-900">Escolher segundo jogador</h3>
           <p className="mt-0.5 text-xs text-neutral-500">
-            Comparação usa o perfil actualmente seleccionado
+            Abre a página de comparação com o perfil seleccionado
             {currentProfileName ? `: ${currentProfileName}` : '.'}
           </p>
         </div>
@@ -943,98 +854,6 @@ function CompareSearchBar({
   );
 }
 
-function CompareView({ data }: { data: CompareResult }) {
-  const { player_a: a, player_b: b, profile, same_pool } = data;
-  const aByMetric = new Map(a.contributions.map((c) => [c.metric_code, c]));
-  const bByMetric = new Map(b.contributions.map((c) => [c.metric_code, c]));
-  const allMetrics = Array.from(new Set([...aByMetric.keys(), ...bByMetric.keys()]));
-
-  return (
-    <section className="mb-6">
-      {!same_pool && (
-        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          <strong>Comparação entre pools diferentes.</strong> Os percentis de cada jogador são calculados
-          dentro do seu próprio pool ({a.pool_name} vs {b.pool_name}), o que torna a comparação indicativa
-          — não literal. Um percentil 75 num pool pode não equivaler a 75 noutro.
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <CompareCard label="A" player={a} color="#10b981" />
-        <CompareCard label="B" player={b} color="#f59e0b" />
-      </div>
-
-      <div className="mt-6 rounded-lg border border-neutral-200 bg-white p-5">
-        <div className="mb-2">
-          <h3 className="text-sm font-semibold text-neutral-900">{profile.name}</h3>
-          {profile.description && (
-            <p className="mt-0.5 text-xs text-neutral-500">{profile.description}</p>
-          )}
-        </div>
-        <Radar
-          series={[
-            { label: a.name, color: '#10b981', contributions: a.contributions },
-            { label: b.name, color: '#f59e0b', contributions: b.contributions },
-          ]}
-        />
-      </div>
-
-      <div className="mt-4 overflow-hidden rounded-lg border border-neutral-200 bg-white">
-        <table className="w-full text-xs">
-          <thead className="bg-neutral-50 text-left text-neutral-500">
-            <tr>
-              <th className="px-4 py-2">Métrica</th>
-              <th className="px-4 py-2 text-right">A · Valor</th>
-              <th className="px-4 py-2 text-right">A · Percentil</th>
-              <th className="px-4 py-2 text-right">B · Valor</th>
-              <th className="px-4 py-2 text-right">B · Percentil</th>
-              <th className="px-4 py-2 text-right">Δ Percentil</th>
-            </tr>
-          </thead>
-          <tbody>
-            {allMetrics.map((code) => {
-              const ca = aByMetric.get(code);
-              const cb = bByMetric.get(code);
-              const delta = ca && cb ? ca.percentile - cb.percentile : null;
-              return (
-                <tr key={code} className="border-t border-neutral-100">
-                  <td className="px-4 py-2 font-mono text-neutral-700">{code}</td>
-                  <td className="px-4 py-2 text-right text-neutral-700">
-                    {ca?.raw_value == null ? '—' : ca.raw_value.toFixed(2)}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    {ca == null ? '—' : <PercentileCell value={ca.percentile} />}
-                  </td>
-                  <td className="px-4 py-2 text-right text-neutral-700">
-                    {cb?.raw_value == null ? '—' : cb.raw_value.toFixed(2)}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    {cb == null ? '—' : <PercentileCell value={cb.percentile} />}
-                  </td>
-                  <td className="px-4 py-2 text-right font-medium">
-                    {delta == null ? (
-                      '—'
-                    ) : (
-                      <span
-                        className={
-                          delta > 5 ? 'text-emerald-700' : delta < -5 ? 'text-red-700' : 'text-neutral-500'
-                        }
-                      >
-                        {delta > 0 ? '+' : ''}
-                        {delta.toFixed(1)}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
 function PercentileCell({ value }: { value: number }) {
   return (
     <span
@@ -1048,45 +867,6 @@ function PercentileCell({ value }: { value: number }) {
     >
       {value.toFixed(1)}
     </span>
-  );
-}
-
-function CompareCard({
-  label,
-  player,
-  color,
-}: {
-  label: string;
-  player: CompareResult['player_a'];
-  color: string;
-}) {
-  return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-block h-2.5 w-2.5 rounded-full"
-              style={{ backgroundColor: color }}
-            />
-            <span className="text-xs font-medium uppercase tracking-wider text-neutral-500">
-              Jogador {label}
-            </span>
-          </div>
-          <h3 className="mt-1 truncate text-lg font-semibold text-neutral-900">{player.name}</h3>
-          <p className="mt-0.5 truncate text-xs text-neutral-500">
-            {[player.current_team, player.position_primary].filter(Boolean).join(' · ')}
-            {player.pool_name && <span className="text-neutral-400"> · {player.pool_name}</span>}
-          </p>
-        </div>
-        <div className="shrink-0 text-right">
-          <div className="text-2xl font-semibold text-neutral-900">{player.score.toFixed(1)}</div>
-          <div className="text-xs text-neutral-500">
-            #{player.rank} de {player.total_eligible}
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -1140,166 +920,6 @@ function BreakdownTable({
           Métricas em falta: {missing.map((code) => labels[code] ?? code).join(', ')}
         </p>
       )}
-    </div>
-  );
-}
-
-type RadarSeries = {
-  label: string;
-  color: string;
-  contributions: Contribution[];
-  /** Contorno tracejado e sem preenchimento: épocas sobrepostas à actual. */
-  dashed?: boolean;
-};
-
-/** Parte um nome de métrica em até duas linhas, para caber ao lado do radar. */
-function wrapLabel(text: string, max = 20): string[] {
-  if (text.length <= max) return [text];
-  const words = text.split(' ');
-  let first = '';
-  while (words.length > 1 && (first + ' ' + words[0]).trim().length <= max) {
-    first = (first + ' ' + words.shift()).trim();
-  }
-  if (!first) first = words.shift() ?? '';
-  const rest = words.join(' ');
-  return [first, rest.length > max + 4 ? `${rest.slice(0, max + 3)}…` : rest].filter(Boolean);
-}
-
-function Radar({ series, labels = {} }: { series: RadarSeries[]; labels?: Record<string, string> }) {
-  const size = 460;
-  const center = size / 2;
-  const radius = size / 2 - 110;
-
-  if (series.length === 0) return null;
-  const baseMetrics = series[0].contributions.map((c) => c.metric_code);
-  const n = baseMetrics.length;
-  if (n === 0) return null;
-
-  const angleAt = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
-  const ringLevels = [0.25, 0.5, 0.75, 1.0];
-
-  return (
-    <div className="mx-auto max-w-lg">
-      {series.length > 1 && (
-        <div className="mb-3 flex flex-wrap justify-center gap-4">
-          {series.map((s) => (
-            <div key={s.label} className="flex items-center gap-2">
-              <span
-                className="inline-block h-0 w-5 border-t-2"
-                style={{ borderColor: s.color, borderTopStyle: s.dashed ? 'dashed' : 'solid' }}
-              />
-              <span className="text-xs text-neutral-700">{s.label}</span>
-            </div>
-          ))}
-        </div>
-      )}
-      <svg viewBox={`0 0 ${size} ${size}`} className="block" style={{ maxWidth: '100%', height: 'auto' }}>
-        {ringLevels.map((level) => {
-          const pts = Array.from({ length: n }, (_, i) => {
-            const angle = angleAt(i);
-            const r = level * radius;
-            return `${center + r * Math.cos(angle)},${center + r * Math.sin(angle)}`;
-          }).join(' ');
-          return (
-            <polygon
-              key={level}
-              points={pts}
-              fill="none"
-              stroke="#e5e5e5"
-              strokeWidth={1}
-            />
-          );
-        })}
-
-        {baseMetrics.map((_, i) => {
-          const angle = angleAt(i);
-          return (
-            <line
-              key={`axis-${i}`}
-              x1={center}
-              y1={center}
-              x2={center + radius * Math.cos(angle)}
-              y2={center + radius * Math.sin(angle)}
-              stroke="#e5e5e5"
-              strokeWidth={1}
-            />
-          );
-        })}
-
-        {series.map((s) => {
-          const byMetric = new Map(s.contributions.map((c) => [c.metric_code, c]));
-          const points = baseMetrics.map((code, i) => {
-            const c = byMetric.get(code);
-            const pct = c?.percentile ?? 0;
-            const angle = angleAt(i);
-            const r = (pct / 100) * radius;
-            return {
-              x: center + r * Math.cos(angle),
-              y: center + r * Math.sin(angle),
-            };
-          });
-          const pathD = points.map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(' ') + ' Z';
-          return (
-            <g key={s.label}>
-              <path
-                d={pathD}
-                fill={s.dashed ? 'none' : s.color}
-                fillOpacity={series.length > 1 ? 0.18 : 0.22}
-                stroke={s.color}
-                strokeWidth={2}
-                strokeDasharray={s.dashed ? '6 4' : undefined}
-              />
-              {points.map((p, i) => (
-                <circle key={`dot-${s.label}-${i}`} cx={p.x} cy={p.y} r={3} fill={s.color} />
-              ))}
-            </g>
-          );
-        })}
-
-        {baseMetrics.map((code, i) => {
-          const angle = angleAt(i);
-          const labelX = center + (radius + 22) * Math.cos(angle);
-          const labelY = center + (radius + 22) * Math.sin(angle);
-          let anchor: 'start' | 'middle' | 'end' = 'middle';
-          if (labelX < center - 10) anchor = 'end';
-          else if (labelX > center + 10) anchor = 'start';
-
-          const named = labels[code];
-          const lines = wrapLabel(named ?? code, named ? 20 : 40);
-          const percentiles = series
-            .map((s) => s.contributions.find((c) => c.metric_code === code)?.percentile ?? null)
-            .map((v) => (v == null ? '—' : v.toFixed(0)));
-
-          return (
-            <g key={`label-${i}`}>
-              {lines.map((line, li) => (
-                <text
-                  key={li}
-                  x={labelX}
-                  y={labelY - 6 - (lines.length - 1 - li) * 11}
-                  textAnchor={anchor}
-                  dominantBaseline="middle"
-                  fontSize={10}
-                  fill="#525252"
-                  fontFamily={named ? undefined : 'monospace'}
-                >
-                  {line}
-                </text>
-              ))}
-              <text
-                x={labelX}
-                y={labelY + 7}
-                textAnchor={anchor}
-                dominantBaseline="middle"
-                fontSize={9}
-                fill="#a3a3a3"
-              >
-                {percentiles.join(' / ')}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
     </div>
   );
 }

@@ -14,7 +14,7 @@
  */
 
 import { useState } from 'react';
-import { competitionLabel, groupPoolsByCountry, poolSeasons, type PoolOption } from '@/lib/pools';
+import { competitionId, competitionLabel, groupPoolsByCountry, poolSeasons, type PoolOption } from '@/lib/pools';
 
 type Props = {
   pools: PoolOption[];
@@ -43,13 +43,9 @@ export function PoolPicker({ pools, value, onChange, selectClassName, className,
   const handleSeason = (next: string) => {
     setPickedSeason(next);
     if (!current) return;
-    // Mesma competição (e país) na época nova, se existir.
-    const same = pools.find(
-      (p) =>
-        p.season === next &&
-        competitionLabel(p) === competitionLabel(current) &&
-        (p.country ?? '') === (current.country ?? '')
-    );
+    // Mesma competição na época nova, se existir — pelo código, para apanhar
+    // provas que mudaram de nome entre épocas.
+    const same = pools.find((p) => p.season === next && competitionId(p) === competitionId(current));
     onChange(same ? same.id : '');
   };
 

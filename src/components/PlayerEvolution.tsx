@@ -29,6 +29,8 @@ export type SeasonEntry = {
   competition: string;
   country: string | null;
   tier: number | null;
+  competition_key?: string | null;
+  in_pyramid?: boolean;
   team: string | null;
   position_primary: string | null;
   via_position?: string | null;
@@ -58,17 +60,20 @@ const BIG_CHANGE = 15;
 function tierMove(prev: SeasonEntry | undefined, cur: SeasonEntry): 'up' | 'down' | null {
   if (!prev || prev.tier == null || cur.tier == null || prev.season === cur.season) return null;
   if ((prev.country ?? '') !== (cur.country ?? '')) return null;
-  // Ligas de sub-23 não fazem parte da pirâmide: ir de lá para a Liga 2 (ou o
-  // contrário) é mudar de liga, mas não é "subir" nem "descer" de escalão.
-  const youth = /sub-?\s?23|u-?23|revela/i;
-  if (youth.test(prev.competition) || youth.test(cur.competition)) return null;
+  // Ligas fora da pirâmide (sub-23): ir de lá para a Liga 2, ou o contrário, é
+  // mudar de liga, mas não é "subir" nem "descer" de escalão.
+  if (prev.in_pyramid === false || cur.in_pyramid === false) return null;
   if (cur.tier < prev.tier) return 'up';
   if (cur.tier > prev.tier) return 'down';
   return null;
 }
 
 function sameLeague(a: SeasonEntry | undefined, b: SeasonEntry): boolean {
-  return Boolean(a) && (a!.country ?? '') === (b.country ?? '') && a!.competition === b.competition;
+  if (!a) return false;
+  // Pelo código da competição, para a mesma prova contar como a mesma liga
+  // quando muda de nome entre épocas; sem código, por país + nome.
+  if (a.competition_key && b.competition_key) return a.competition_key === b.competition_key;
+  return (a.country ?? '') === (b.country ?? '') && a.competition === b.competition;
 }
 
 /** Histórico do jogador para um perfil. Refaz o pedido quando muda o jogador ou o perfil. */

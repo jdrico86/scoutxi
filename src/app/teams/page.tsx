@@ -6,6 +6,7 @@ import { FavoriteStar } from '@/components/FavoriteStar';
 import { PoolPicker } from '@/components/PoolPicker';
 import { useMyClub } from '@/lib/hooks/useMyClub';
 import { POSITION_FAMILIES } from '@/lib/scouting/position-families';
+import { TeamStatsTab } from './TeamStatsTab';
 
 type Pool = { id: string; name: string; season: string; competition: string | null; competition_key?: string | null };
 
@@ -87,6 +88,7 @@ function TeamsContent() {
   const initialMaxAge = searchParams.get('max_age') ?? '30';
   const initialMinMinutes = searchParams.get('min_minutes') ?? '500';
   const initialSort = searchParams.get('sort') === 'minutes' ? 'minutes' : 'position';
+  const initialTab = searchParams.get('tab') === 'estatistica' ? 'estatistica' : 'plantel';
 
   const [poolId, setPoolId] = useState<string>(initialPool);
   const [teamName, setTeamName] = useState<string>(initialTeam);
@@ -94,6 +96,7 @@ function TeamsContent() {
   const [maxAge, setMaxAge] = useState<string>(initialMaxAge);
   const [minMinutes, setMinMinutes] = useState<string>(initialMinMinutes);
   const [sortMode, setSortMode] = useState<'position' | 'minutes'>(initialSort);
+  const [tab, setTab] = useState<'plantel' | 'estatistica'>(initialTab);
 
   // Meu clube: a página abre nele quando se entra sem equipa escolhida, e é
   // aqui que se define ou muda.
@@ -147,12 +150,13 @@ function TeamsContent() {
     if (maxAge) params.set('max_age', maxAge);
     if (minMinutes) params.set('min_minutes', minMinutes);
     if (sortMode !== 'position') params.set('sort', sortMode);
+    if (tab !== 'plantel') params.set('tab', tab);
     const next = params.toString();
     const current = searchParams.toString();
     if (next !== current) {
       router.replace(next ? `/teams?${next}` : '/teams', { scroll: false });
     }
-  }, [poolId, teamName, minAge, maxAge, minMinutes, sortMode, router, searchParams]);
+  }, [poolId, teamName, minAge, maxAge, minMinutes, sortMode, tab, router, searchParams]);
 
   // Carregar equipa
   const loadTeam = useCallback(async () => {
@@ -333,9 +337,9 @@ function TeamsContent() {
           </div>
         </section>
 
-        {/* Meu clube e procura de reforços */}
+        {/* Meu clube */}
         {poolId && teamName && (
-          <section className="mb-4 rounded-lg border border-neutral-200 bg-white p-5">
+          <section className="mb-4 rounded-lg border border-neutral-200 bg-white px-5 py-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="text-sm text-neutral-700">
                 {isMyClub ? (
@@ -352,13 +356,21 @@ function TeamsContent() {
                 disabled={clubBusy}
                 className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
               >
-                {isMyClub ? 'Deixar de ser o meu clube' : 'Definir como meu clube'}
+                {isMyClub ? 'Desselecionar clube' : 'Definir como meu clube'}
               </button>
             </div>
             {clubError && <p className="mt-2 text-xs text-red-700">{clubError}</p>}
+          </section>
+        )}
 
-            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-neutral-100 pt-4 text-xs">
-              <span className="text-neutral-500">Procurar reforço:</span>
+        {/* Procurar reforço: a entrada para a página Reforços */}
+        {poolId && teamName && (
+          <section className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-5 py-4">
+            <h2 className="text-sm font-semibold text-neutral-900">Procurar reforço</h2>
+            <p className="mt-0.5 text-xs text-neutral-600">
+              Escolhe a posição para comparar o plantel com candidatos de outra liga.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
               {POSITION_FAMILIES.map((f) => (
                 <button
                   key={f.key}
@@ -367,7 +379,7 @@ function TeamsContent() {
                     const params = new URLSearchParams({ pool: poolId, team: teamName, pos: f.key });
                     router.push(`/reforcos?${params}`);
                   }}
-                  className="rounded-md border border-neutral-300 px-3 py-1 text-neutral-700 hover:bg-neutral-50"
+                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                 >
                   {f.label}
                 </button>
@@ -376,7 +388,31 @@ function TeamsContent() {
           </section>
         )}
 
+        {/* Separadores: plantel ou estatística da equipa */}
+        {poolId && teamName && (
+          <div className="mb-4 flex gap-2 text-sm">
+            {(['plantel', 'estatistica'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                aria-pressed={tab === t}
+                className={`rounded-md px-4 py-1.5 font-medium ${tab === t
+                    ? 'bg-neutral-900 text-white'
+                    : 'border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50'
+                  }`}
+              >
+                {t === 'plantel' ? 'Plantel' : 'Estatística de equipa'}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {tab === 'estatistica' && poolId && teamName && <TeamStatsTab poolId={poolId} team={teamName} />}
+
         {/* Conteúdo */}
+        {(tab === 'plantel' || !poolId || !teamName) && (
+          <>
         {loading && (
           <div className="rounded-lg border border-neutral-200 bg-white p-10 text-center text-sm text-neutral-500">
             A carregar…
@@ -411,6 +447,8 @@ function TeamsContent() {
                 ? 'Escolhe uma equipa.'
                 : 'A preparar…'}
           </div>
+        )}
+          </>
         )}
       </div>
     </main>

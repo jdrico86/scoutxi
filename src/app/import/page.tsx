@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { competitionId, competitionLabel, poolSeasons, slugifyCompetition, type PoolOption, pastSeasonReference } from '@/lib/pools';
+import { TeamStatsImport } from './TeamStatsImport';
 
 type ApiResponse = {
   ok?: boolean;
@@ -430,6 +431,8 @@ export default function ImportPage() {
             )}
           </div>
         )}
+
+        <TeamStatsImport pools={pools} />
       </div>
     </main>
   );

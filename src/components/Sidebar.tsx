@@ -16,6 +16,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { FavoriteStar } from '@/components/FavoriteStar';
+import { useMyClub } from '@/lib/hooks/useMyClub';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import type { User } from '@supabase/supabase-js';
 
@@ -63,6 +64,7 @@ export function Sidebar() {
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const supabase = createSupabaseBrowserClient();
+  const myClub = useMyClub();
 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -166,6 +168,17 @@ export function Sidebar() {
     router.refresh();
   };
 
+  // Atalho para o clube do utilizador. Sem pool localizada (clube que ainda não
+  // está em nenhuma liga importada) leva à página Equipas, para escolher outro.
+  const goToMyClub = () => {
+    if (myClub.club && myClub.location) {
+      const params = new URLSearchParams({ pool: myClub.location.pool_id, team: myClub.club.team });
+      router.push(`/teams?${params}`);
+    } else {
+      router.push('/teams');
+    }
+  };
+
   const hasResults = playerResults.length > 0 || teamResults.length > 0;
   const visibleNav = NAV.filter((item) => !item.adminOnly || isAdmin);
 
@@ -185,6 +198,32 @@ export function Sidebar() {
 
       {/* Navegação */}
       <nav className="flex-1 px-3 py-4">
+        {/* Meu clube */}
+        {user && myClub.loaded && (
+          <div className="mb-4">
+            <div className="px-3 pb-2 text-xs font-medium uppercase tracking-wider text-neutral-400">
+              Meu clube
+            </div>
+            <button
+              type="button"
+              onClick={goToMyClub}
+              className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-neutral-600 transition-colors hover:bg-neutral-50 hover:text-neutral-900"
+            >
+              <Shield className="h-4 w-4 shrink-0" strokeWidth={1.8} />
+              {myClub.club ? (
+                <span className="min-w-0">
+                  <span className="block truncate font-medium text-neutral-900">{myClub.club.team}</span>
+                  {myClub.location && (
+                    <span className="block truncate text-xs text-neutral-500">{myClub.location.pool_name}</span>
+                  )}
+                </span>
+              ) : (
+                <span className="text-neutral-500">Definir em Equipas</span>
+              )}
+            </button>
+          </div>
+        )}
+
         <ul className="space-y-0.5">
           {visibleNav.map((item) => {
             const Icon = item.icon;

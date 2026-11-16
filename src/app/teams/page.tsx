@@ -4,8 +4,10 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FavoriteStar } from '@/components/FavoriteStar';
 import { PoolPicker } from '@/components/PoolPicker';
+import { useMyClub } from '@/lib/hooks/useMyClub';
+import { POSITION_FAMILIES } from '@/lib/scouting/position-families';
 
-type Pool = { id: string; name: string; season: string; competition: string | null };
+type Pool = { id: string; name: string; season: string; competition: string | null; competition_key?: string | null };
 
 type ProfileScore = {
   profile_id: string;
@@ -92,6 +94,30 @@ function TeamsContent() {
   const [maxAge, setMaxAge] = useState<string>(initialMaxAge);
   const [minMinutes, setMinMinutes] = useState<string>(initialMinMinutes);
   const [sortMode, setSortMode] = useState<'position' | 'minutes'>(initialSort);
+
+  // Meu clube: a página abre nele quando se entra sem equipa escolhida, e é
+  // aqui que se define ou muda.
+  const myClub = useMyClub();
+  const [clubBusy, setClubBusy] = useState(false);
+  const [clubError, setClubError] = useState<string | null>(null);
+  const [openedOnClub, setOpenedOnClub] = useState(false);
+  if (!openedOnClub && !poolId && !teamName && myClub.club && myClub.location) {
+    // Ajuste de estado durante o render (e não num efeito): acontece uma vez,
+    // quando a localização do clube chega.
+    setOpenedOnClub(true);
+    setPoolId(myClub.location.pool_id);
+    setTeamName(myClub.club.team);
+  }
+  const isMyClub = Boolean(myClub.club && teamName && myClub.club.team === teamName);
+
+  const toggleMyClub = async () => {
+    setClubBusy(true);
+    setClubError(null);
+    const competitionKey = pools.find((p) => p.id === poolId)?.competition_key ?? null;
+    const err = await myClub.setClub(isMyClub ? null : { team: teamName, competition_key: competitionKey });
+    if (err) setClubError(err);
+    setClubBusy(false);
+  };
 
   // Carregar pools
   useEffect(() => {
@@ -306,6 +332,49 @@ function TeamsContent() {
             )}
           </div>
         </section>
+
+        {/* Meu clube e procura de reforços */}
+        {poolId && teamName && (
+          <section className="mb-4 rounded-lg border border-neutral-200 bg-white p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm text-neutral-700">
+                {isMyClub ? (
+                  <>
+                    <span className="font-medium text-neutral-900">{teamName}</span> é o meu clube.
+                  </>
+                ) : (
+                  <span className="font-medium text-neutral-900">{teamName}</span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={toggleMyClub}
+                disabled={clubBusy}
+                className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+              >
+                {isMyClub ? 'Deixar de ser o meu clube' : 'Definir como meu clube'}
+              </button>
+            </div>
+            {clubError && <p className="mt-2 text-xs text-red-700">{clubError}</p>}
+
+            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-neutral-100 pt-4 text-xs">
+              <span className="text-neutral-500">Procurar reforço:</span>
+              {POSITION_FAMILIES.map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => {
+                    const params = new URLSearchParams({ pool: poolId, team: teamName, pos: f.key });
+                    router.push(`/reforcos?${params}`);
+                  }}
+                  className="rounded-md border border-neutral-300 px-3 py-1 text-neutral-700 hover:bg-neutral-50"
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Conteúdo */}
         {loading && (

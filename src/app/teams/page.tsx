@@ -98,6 +98,23 @@ function TeamsContent() {
   const [sortMode, setSortMode] = useState<'position' | 'minutes'>(initialSort);
   const [tab, setTab] = useState<'plantel' | 'estatistica'>(initialTab);
 
+  // A pesquisa do menu e o atalho "Meu clube" mudam o endereço com a página já
+  // aberta. O estado só lia a URL ao abrir, por isso a página ficava na equipa
+  // anterior. Quando a equipa da URL muda por fora, a página segue-a.
+  // (Quando é a própria página a escrever a URL, ela já coincide com o estado.)
+  const urlPool = searchParams.get('pool') ?? '';
+  const urlTeam = searchParams.get('team') ?? '';
+  const urlKey = `${urlPool}|${urlTeam}`;
+  const [seenUrlKey, setSeenUrlKey] = useState(urlKey);
+  if (urlKey !== seenUrlKey) {
+    setSeenUrlKey(urlKey);
+    if (urlPool && urlTeam && (urlPool !== poolId || urlTeam !== teamName)) {
+      setPoolId(urlPool);
+      setTeamName(urlTeam);
+      setTab(initialTab);
+    }
+  }
+
   // Meu clube: a página abre nele quando se entra sem equipa escolhida, e é
   // aqui que se define ou muda.
   const myClub = useMyClub();

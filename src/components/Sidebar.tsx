@@ -44,12 +44,14 @@ type PlayerHit = {
   position_primary: string | null;
   age: number | null;
   pool_name: string | null;
+  seasons?: number;
 };
 
 type TeamHit = {
   name: string;
   pool_id: string;
   pool_name: string | null;
+  seasons?: number;
 };
 
 export function Sidebar() {
@@ -60,6 +62,8 @@ export function Sidebar() {
   const [teamResults, setTeamResults] = useState<TeamHit[]>([]);
   const [showResults, setShowResults] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Altura que a lista de resultados pode ocupar sem sair do ecrã.
+  const [resultsMaxHeight, setResultsMaxHeight] = useState(384);
 
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
@@ -68,6 +72,7 @@ export function Sidebar() {
 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Obter user actual + admin flag
   useEffect(() => {
@@ -139,6 +144,19 @@ export function Sidebar() {
       }
     }, 250);
   }, [query]);
+
+  // A pesquisa fica a meio do menu: a lista abre para baixo e, numa janela
+  // baixa, saía do ecrã sem se poder rolar. Mede-se o espaço que sobra.
+  useEffect(() => {
+    if (!showResults) return;
+    const measure = () => {
+      const bottom = inputRef.current?.getBoundingClientRect().bottom ?? 0;
+      setResultsMaxHeight(Math.max(160, Math.round(window.innerHeight - bottom - 16)));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [showResults]);
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/';
@@ -256,6 +274,7 @@ export function Sidebar() {
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400" strokeWidth={2} />
               <input
+                ref={inputRef}
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -266,7 +285,10 @@ export function Sidebar() {
             </div>
 
             {showResults && (query.length >= 2) && (
-              <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-96 overflow-y-auto rounded-md border border-neutral-200 bg-white shadow-lg">
+              <div
+                className="absolute left-0 right-0 top-full z-30 mt-1 overflow-y-auto overscroll-contain rounded-md border border-neutral-200 bg-white shadow-lg"
+                style={{ maxHeight: resultsMaxHeight }}
+              >
                 {loading ? (
                   <div className="px-3 py-2 text-xs text-neutral-500">A procurar…</div>
                 ) : !hasResults ? (
@@ -293,6 +315,7 @@ export function Sidebar() {
                                 {t.pool_name && (
                                   <div className="ml-6 mt-0.5 truncate text-xs text-neutral-500">
                                     {t.pool_name}
+                                    {(t.seasons ?? 1) > 1 && <span className="text-neutral-400"> · {t.seasons} épocas</span>}
                                   </div>
                                 )}
                               </button>
@@ -325,6 +348,7 @@ export function Sidebar() {
                                 <div className="ml-6 mt-0.5 truncate text-xs text-neutral-500">
                                   {[p.current_team, p.position_primary, p.age].filter(Boolean).join(' · ')}
                                   {p.pool_name && <span className="text-neutral-400"> · {p.pool_name}</span>}
+                                  {(p.seasons ?? 1) > 1 && <span className="text-neutral-400"> · {p.seasons} épocas</span>}
                                 </div>
                               </button>
                             </li>

@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { FileText } from 'lucide-react';
 
 type Format = { decimals: number; unit?: '%' | 'm'; signed?: boolean };
 type Ranked = { value: number | null; rank: number | null; of: number; mean: number | null };
@@ -21,7 +22,7 @@ type TeamBlock = {
   level: { xg: Ranked; xg_against: Ranked; xg_diff: Ranked };
   metrics: Record<string, Ranked>;
 };
-type StatsData =
+export type StatsData =
   | { available: false; reason: 'pool' | 'team' }
   | {
       available: true;
@@ -36,8 +37,8 @@ type StatsData =
     };
 
 const GROUP_COLOR: Record<GroupKey, string> = { defender: '#0369A1', posse: '#15803D', atacar: '#C2410C' };
-const TEAM_A = '#2563EB';
-const TEAM_B = '#F59E0B';
+export const TEAM_A = '#2563EB';
+export const TEAM_B = '#F59E0B';
 const TEAM_B_TEXT = '#B45309';
 const LIST_SIZE = 8;
 
@@ -124,34 +125,8 @@ export function TeamStatsTab({ poolId, team }: { poolId: string; team: string })
 
   const a = data.team;
   const b = data.vs;
-  const of = a.level.xg.of;
-  const stamp = data.updated.round_label
-    ? `Atualizado à jornada ${data.updated.round_label}`
-    : data.updated.last_date
-      ? `Atualizado a ${formatDate(data.updated.last_date)}`
-      : '';
+  const stamp = updateStamp(data);
   const others = data.teams.filter((t) => t !== a.team);
-
-  const ranked = data.metrics.filter((m) => a.metrics[m.code]?.rank != null);
-  const half = of / 2;
-  const standsOut = ranked
-    .filter((m) => (a.metrics[m.code].rank as number) <= half)
-    .sort((x, y) => (a.metrics[x.code].rank as number) - (a.metrics[y.code].rank as number))
-    .slice(0, LIST_SIZE);
-  const doesNot = ranked
-    .filter((m) => (a.metrics[m.code].rank as number) > half)
-    .sort((x, y) => (a.metrics[y.code].rank as number) - (a.metrics[x.code].rank as number))
-    .slice(0, LIST_SIZE);
-  const differ = b
-    ? ranked
-        .filter((m) => b.metrics[m.code]?.rank != null)
-        .sort(
-          (x, y) =>
-            Math.abs((a.metrics[y.code].rank as number) - (b.metrics[y.code].rank as number)) -
-            Math.abs((a.metrics[x.code].rank as number) - (b.metrics[x.code].rank as number))
-        )
-        .slice(0, LIST_SIZE)
-    : [];
 
   return (
     <div className={`space-y-4 ${loading ? 'opacity-60' : ''}`}>
@@ -191,6 +166,13 @@ export function TeamStatsTab({ poolId, team }: { poolId: string; team: string })
               ))}
             </div>
           )}
+          <a
+            href={`/teams/report?${new URLSearchParams({ pool: poolId, team: a.team, scope, ...(b ? { vs: b.team } : {}) })}`}
+            className="flex items-center gap-1.5 rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+          >
+            <FileText className="h-3.5 w-3.5" strokeWidth={2} />
+            Relatório
+          </a>
           <select
             aria-label="Comparar com outra equipa"
             value={vs}
@@ -216,15 +198,63 @@ export function TeamStatsTab({ poolId, team }: { poolId: string; team: string })
         </div>
       </div>
 
+      <TeamStatsBody data={data} />
+    </div>
+  );
+}
+
+export type TeamStatsAvailable = Extract<StatsData, { available: true }>;
+
+/** "Atualizado à jornada 8", ou a data do último jogo quando não há jornada. */
+export function updateStamp(data: TeamStatsAvailable): string {
+  return data.updated.round_label
+    ? `Atualizado à jornada ${data.updated.round_label}`
+    : data.updated.last_date
+      ? `Atualizado a ${formatDate(data.updated.last_date)}`
+      : '';
+}
+
+/**
+ * O conteúdo da estatística, sem os comandos: nível, gráficos, listas e nota.
+ * Usado no separador da equipa e no relatório para descarregar. `fixed` fixa as
+ * colunas, para o relatório sair igual em qualquer tamanho de janela.
+ */
+export function TeamStatsBody({ data, fixed = false }: { data: TeamStatsAvailable; fixed?: boolean }) {
+  const a = data.team;
+  const b = data.vs;
+  const of = a.level.xg.of;
+  const ranked = data.metrics.filter((m) => a.metrics[m.code]?.rank != null);
+  const half = of / 2;
+  const standsOut = ranked
+    .filter((m) => (a.metrics[m.code].rank as number) <= half)
+    .sort((x, y) => (a.metrics[x.code].rank as number) - (a.metrics[y.code].rank as number))
+    .slice(0, LIST_SIZE);
+  const doesNot = ranked
+    .filter((m) => (a.metrics[m.code].rank as number) > half)
+    .sort((x, y) => (a.metrics[y.code].rank as number) - (a.metrics[x.code].rank as number))
+    .slice(0, LIST_SIZE);
+  const differ = b
+    ? ranked
+        .filter((m) => b.metrics[m.code]?.rank != null)
+        .sort(
+          (x, y) =>
+            Math.abs((a.metrics[y.code].rank as number) - (b.metrics[y.code].rank as number)) -
+            Math.abs((a.metrics[x.code].rank as number) - (b.metrics[x.code].rank as number))
+        )
+        .slice(0, LIST_SIZE)
+    : [];
+
+  return (
+    <>
       {/* Nível */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className={`grid gap-3 ${fixed ? 'grid-cols-3' : 'grid-cols-1 md:grid-cols-3'}`}>
         <LevelCard label="Golos esperados criados" a={a.level.xg} b={b?.level.xg} format={{ decimals: 2 }} />
         <LevelCard label="Golos esperados consentidos" a={a.level.xg_against} b={b?.level.xg_against} format={{ decimals: 2 }} />
         <LevelCard label="Diferença por jogo" a={a.level.xg_diff} b={b?.level.xg_diff} format={{ decimals: 2, signed: true }} />
       </div>
 
       {/* Três gráficos */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+      <div className={`grid gap-3 ${fixed ? 'grid-cols-3' : 'grid-cols-1 lg:grid-cols-3'}`}>
         {data.groups.map((g) => (
           <section key={g.key} className="rounded-lg border border-neutral-200 bg-white px-4 py-4">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-neutral-900">
@@ -262,7 +292,7 @@ export function TeamStatsTab({ poolId, team }: { poolId: string; team: string })
           </div>
         </section>
       ) : (
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className={`grid gap-3 ${fixed ? 'grid-cols-2' : 'grid-cols-1 lg:grid-cols-2'}`}>
           <RankList title="Onde se destaca" metrics={standsOut} team={a} />
           <RankList title="Onde não se destaca" metrics={doesNot} team={a} />
         </div>
@@ -272,7 +302,7 @@ export function TeamStatsTab({ poolId, team }: { poolId: string; team: string })
         Médias por jogo e lugar entre as {of} equipas {data.scope === 'pool' ? 'do campeonato' : 'com que se compara'}. Barra ou
         fatia cheia = 1.º lugar. No PPDA, nos consentidos e nos cartões amarelos, o 1.º é quem tem menos.
       </p>
-    </div>
+    </>
   );
 }
 

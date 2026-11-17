@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from('team_match_stats')
-      .select('team, opponent, match_date, stats')
+      .select('team, opponent, match_date, duration, stats')
       .eq('pool_id', poolId)
       .order('match_date')
       .order('id')

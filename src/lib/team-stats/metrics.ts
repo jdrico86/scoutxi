@@ -12,8 +12,13 @@ export type TeamGameRow = {
   team: string;
   opponent: string;
   match_date: string;
+  /** Duração do jogo em minutos. Em falta, usa-se a média dos outros jogos. */
+  duration?: number | null;
   stats: Record<string, number>;
 };
+
+/** Duração assumida quando nenhum jogo a traz. */
+const DEFAULT_DURATION = 95;
 
 export type MetricGroup = 'defender' | 'posse' | 'atacar';
 
@@ -59,8 +64,21 @@ export const TEAM_METRICS: TeamMetricDef[] = [
   { code: 'defensive_duels', label: 'Duelos defensivos', group: 'defender', chart: true, format: { decimals: 0, unit: '%' }, compute: (o) => pct(o, 'defensive_duels_ok', 'defensive_duels') },
   { code: 'aerial_duels', label: 'Duelos aéreos', group: 'defender', chart: true, format: { decimals: 0, unit: '%' }, compute: (o) => pct(o, 'aerial_duels_ok', 'aerial_duels') },
   {
-    code: 'aggression', label: 'Agressividade', group: 'defender', chart: true, format: { decimals: 1 },
-    compute: (o) => (o.length ? (sum(o, 'fouls') + sum(o, 'sliding_tackles')) / o.length : null),
+    // Aproximação à "Challenge intensity" do Wyscout: acções defensivas por
+    // minuto de posse do adversário. Desconta a posse, ao contrário de uma
+    // simples soma por jogo. Não inclui os duelos por bola solta, que o
+    // ficheiro de equipa não separa, e usa a duração total do jogo em vez do
+    // tempo útil — por isso não coincide com o número do Wyscout.
+    code: 'challenge_intensity', label: 'Intensidade nas disputas', short: 'Intensidade', group: 'defender', chart: true, format: { decimals: 2 },
+    compute: (o, p) => {
+      let actions = 0;
+      let minutes = 0;
+      o.forEach((own, i) => {
+        actions += (own.defensive_duels ?? 0) + (own.interceptions ?? 0) + (own.sliding_tackles ?? 0);
+        minutes += ((own.duration ?? 0) * (p[i]?.possession_pct ?? 0)) / 100;
+      });
+      return minutes > 0 ? actions / minutes : null;
+    },
   },
   { code: 'interceptions', label: 'Intercepções', group: 'defender', chart: true, format: { decimals: 1 }, compute: (o) => avg(o, 'interceptions') },
   { code: 'clearances', label: 'Alívios', group: 'defender', chart: true, format: { decimals: 1 }, compute: (o) => avg(o, 'clearances') },
@@ -68,6 +86,7 @@ export const TEAM_METRICS: TeamMetricDef[] = [
   { code: 'xg_against', label: 'Golos esperados consentidos', group: 'defender', chart: false, lower_first: true, format: { decimals: 2 }, compute: (_o, p) => avg(p, 'xg') },
   { code: 'shot_quality_against', label: 'Qualidade do remate consentido', group: 'defender', chart: false, lower_first: true, format: { decimals: 2 }, compute: (_o, p) => per(p, 'xg', 'shots') },
   { code: 'shot_distance_against', label: 'Distância do remate consentido', group: 'defender', chart: false, format: { decimals: 1, unit: 'm' }, compute: (_o, p) => avg(p, 'shot_distance') },
+  { code: 'fouls', label: 'Faltas cometidas', group: 'defender', chart: false, lower_first: true, format: { decimals: 1 }, compute: (o) => avg(o, 'fouls') },
   { code: 'yellow_cards', label: 'Cartões amarelos', group: 'defender', chart: false, lower_first: true, format: { decimals: 2 }, compute: (o) => avg(o, 'yellow_cards') },
 
   // ── Posse ─────────────────────────────────────────────────────────────
@@ -114,8 +133,13 @@ export type TeamAggregate = {
 /** Junta as linhas por equipa e calcula todas as medidas. */
 export function aggregateTeams(rows: TeamGameRow[]): Map<string, TeamAggregate> {
   // A linha do adversário no mesmo jogo é a da equipa `opponent` nessa data.
+  const known = rows.map((r) => r.duration).filter((d): d is number => typeof d === 'number' && d > 0);
+  const fallback = known.length ? known.reduce((x, y) => x + y, 0) / known.length : DEFAULT_DURATION;
+  // A duração entra nas estatísticas do jogo, para as medidas por minuto.
+  const withDuration = (r: TeamGameRow): Stats => ({ ...r.stats, duration: r.duration && r.duration > 0 ? r.duration : fallback });
+
   const byKey = new Map<string, Stats>();
-  for (const r of rows) byKey.set(`${r.match_date}|${r.team}|${r.opponent}`, r.stats);
+  for (const r of rows) byKey.set(`${r.match_date}|${r.team}|${r.opponent}`, withDuration(r));
 
   const own = new Map<string, Stats[]>();
   const opp = new Map<string, Stats[]>();
@@ -127,7 +151,7 @@ export function aggregateTeams(rows: TeamGameRow[]): Map<string, TeamAggregate> 
       own.set(r.team, []);
       opp.set(r.team, []);
     }
-    own.get(r.team)!.push(r.stats);
+    own.get(r.team)!.push(withDuration(r));
     opp.get(r.team)!.push(other);
     if (!last.has(r.team) || r.match_date > last.get(r.team)!) last.set(r.team, r.match_date);
   }

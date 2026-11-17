@@ -300,7 +300,7 @@ export function TeamStatsBody({ data, fixed = false }: { data: TeamStatsAvailabl
 
       <p className="text-xs text-neutral-500">
         Médias por jogo e lugar entre as {of} equipas {data.scope === 'pool' ? 'do campeonato' : 'com que se compara'}. Barra ou
-        fatia cheia = 1.º lugar. No PPDA, nos consentidos e nos cartões amarelos, o 1.º é quem tem menos.
+        fatia cheia = 1.º lugar. No PPDA, nos consentidos, nas faltas e nos cartões amarelos, o 1.º é quem tem menos.
       </p>
     </>
   );

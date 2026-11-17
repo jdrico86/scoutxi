@@ -16,9 +16,15 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
  *     links enviados com o modelo de email antigo.
  *
  * Em caso de falha volta à página de entrada com o motivo.
+ *
+ * Os redireccionamentos são relativos ("/", "/login?…"), sem domínio. No
+ * Netlify o endereço que a rota vê é o interno do deploy
+ * (main--scoutxi.netlify.app) e não o que a pessoa está a usar; um
+ * redireccionamento com esse domínio levava-a para outro site, onde a sessão
+ * acabada de criar não existe.
  */
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
   const tokenHash = searchParams.get('token_hash');
   const type = (searchParams.get('type') ?? 'email') as EmailOtpType;
   const code = searchParams.get('code');
@@ -26,7 +32,8 @@ export async function GET(request: NextRequest) {
   const wanted = searchParams.get('next') || '/';
   const next = wanted.startsWith('/') && !wanted.startsWith('//') ? wanted : '/';
 
-  const fail = (reason: string) => NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(reason)}`);
+  const go = (path: string) => new NextResponse(null, { status: 303, headers: { Location: path } });
+  const fail = (reason: string) => go(`/login?error=${encodeURIComponent(reason)}`);
 
   const supabase = await createSupabaseServerClient();
   if (tokenHash) {
@@ -38,5 +45,5 @@ export async function GET(request: NextRequest) {
   } else {
     return fail('missing_code');
   }
-  return NextResponse.redirect(`${origin}${next}`);
+  return go(next);
 }

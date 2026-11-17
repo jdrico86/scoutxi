@@ -10,20 +10,23 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
  * Depois redireccionamos para `next` (rota original, antes do login) ou para a home.
  */
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
+  // Redireccionamentos relativos, sem domínio: ver a nota em /auth/confirm.
+  const go = (path: string) => new NextResponse(null, { status: 303, headers: { Location: path } });
   const code = searchParams.get('code');
-  const next = searchParams.get('next') || '/';
+  const wanted = searchParams.get('next') || '/';
+  const next = wanted.startsWith('/') && !wanted.startsWith('//') ? wanted : '/';
 
   if (!code) {
-    return NextResponse.redirect(`${origin}/login?error=missing_code`);
+    return go('/login?error=missing_code');
   }
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
-    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(error.message)}`);
+    return go(`/login?error=${encodeURIComponent(error.message)}`);
   }
 
-  return NextResponse.redirect(`${origin}${next}`);
+  return go(next);
 }

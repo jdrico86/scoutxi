@@ -1,14 +1,19 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextRequest, NextResponse } from 'next/server';
+import { isApprovedUser } from '@/lib/auth/approval';
 
 /**
  * Middleware Next.js que:
  * 1. Refresca a sessão Supabase a cada request (passa cookies actualizados).
  * 2. Protege rotas: se não há sessão, redirecciona para /login.
  *
+ * 3. Exige que a conta esteja aprovada: quem pediu acesso e ainda espera pela
+ *    aprovação tem sessão mas não vê nada.
+ *
  * Rotas públicas (não exigem login):
  * - /login
- * - /auth/callback (redirect do magic link)
+ * - /pedir-acesso (formulário de pedido de acesso)
+ * - /auth/callback e /auth/confirm (chegada do link mágico)
  * - assets estáticos (excluídos no matcher mais abaixo)
  *
  * Tudo o resto exige sessão válida.
@@ -21,7 +26,7 @@ export async function proxy(request: NextRequest) {
   // foi pedido. O exchangeCodeForSession a seguir falha com
   // "PKCE code verifier not found in storage".
   // Tratar a rota como pública não chega: é preciso sair ANTES de criar o cliente.
-  if (request.nextUrl.pathname.startsWith('/auth/callback')) {
+  if (request.nextUrl.pathname.startsWith('/auth/callback') || request.nextUrl.pathname.startsWith('/auth/confirm')) {
     return NextResponse.next({ request: { headers: request.headers } });
   }
 
@@ -65,7 +70,9 @@ export async function proxy(request: NextRequest) {
   // Rotas públicas
   const isPublicRoute =
     pathname.startsWith('/login') ||
+    pathname.startsWith('/pedir-acesso') ||
     pathname.startsWith('/auth/callback') ||
+    pathname.startsWith('/auth/confirm') ||
     pathname.startsWith('/api/auth/');
 
   // Sem sessão → redireccionar para /login
@@ -76,8 +83,21 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Com sessão e ainda na página de login → ir para a home
-  if (user && pathname.startsWith('/login')) {
+  // Com sessão mas sem aprovação → nada do produto. As rotas de dados respondem
+  // 403; as páginas levam ao pedido de acesso.
+  const approved = user ? await isApprovedUser(user) : false;
+  if (user && !approved && !isPublicRoute) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'Conta sem acesso aprovado.' }, { status: 403 });
+    }
+    const url = request.nextUrl.clone();
+    url.pathname = '/pedir-acesso';
+    url.search = '?estado=espera';
+    return NextResponse.redirect(url);
+  }
+
+  // Com sessão aprovada e ainda na página de login → ir para a home
+  if (user && approved && pathname.startsWith('/login')) {
     const url = request.nextUrl.clone();
     url.pathname = '/';
     return NextResponse.redirect(url);

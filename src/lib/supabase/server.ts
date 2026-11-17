@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import type { Database } from './database.types';
+import { isApprovedUser } from '@/lib/auth/approval';
 
 /**
  * Cliente Supabase para usar em Server Components e Route Handlers.
@@ -40,12 +41,14 @@ export async function createSupabaseServerClient() {
 
 /**
  * Helper para obter o utilizador autenticado em Route Handlers.
- * Devolve null se não houver sessão válida.
+ * Devolve null se não houver sessão válida ou se a conta ainda não tiver o
+ * acesso aprovado (ver lib/auth/approval).
  */
 export async function getAuthUser() {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  return user;
+  if (!user) return null;
+  return (await isApprovedUser(user)) ? user : null;
 }

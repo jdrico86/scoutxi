@@ -14,6 +14,7 @@ import {
   Shield,
   LayoutGrid,
   LogOut,
+  UserCog,
 } from 'lucide-react';
 import { FavoriteStar } from '@/components/FavoriteStar';
 import { useMyClub } from '@/lib/hooks/useMyClub';
@@ -35,6 +36,7 @@ const NAV: NavItem[] = [
   { label: 'Minhas Equipas', href: '/squads', icon: LayoutGrid },
   { label: 'Shortlists', href: '/shortlists', icon: ClipboardList },
   { label: 'Importar', href: '/import', icon: Upload, adminOnly: true },
+  { label: 'Utilizadores', href: '/utilizadores', icon: UserCog, adminOnly: true },
 ];
 
 type PlayerHit = {

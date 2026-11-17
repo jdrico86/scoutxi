@@ -1,13 +1,28 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 
+/** Motivo de um link que não deixou entrar, em palavras de quem usa. */
+function linkProblem(reason: string | null): string | null {
+  if (!reason) return null;
+  const r = reason.toLowerCase();
+  if (r.includes('verifier')) {
+    return 'O link foi aberto num navegador diferente daquele onde foi pedido. Pede um link novo e abre-o no mesmo navegador.';
+  }
+  if (r.includes('expired') || r.includes('invalid') || r.includes('not found')) {
+    return 'Este link já foi usado ou expirou. Pede um link novo.';
+  }
+  return 'Não foi possível entrar com esse link. Pede um link novo.';
+}
+
 function LoginForm() {
   const searchParams = useSearchParams();
   const next = searchParams.get('next') || '/';
+  const linkError = linkProblem(searchParams.get('error'));
 
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
@@ -38,7 +53,9 @@ function LoginForm() {
       }
 
       // Enviar magic link
-      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+      // /auth/confirm aceita o link nas duas formas (ver a rota). O endereço
+      // leva sempre um parâmetro, porque o modelo de email lhe acrescenta outros.
+      const redirectTo = `${window.location.origin}/auth/confirm?next=${encodeURIComponent(next)}`;
       const { error: authError } = await supabase.auth.signInWithOtp({
         email: email.trim().toLowerCase(),
         options: {
@@ -48,7 +65,11 @@ function LoginForm() {
       });
 
       if (authError) {
-        setError(authError.message);
+        setError(
+          /security purposes|rate limit/i.test(authError.message)
+            ? 'Acabaste de pedir um link. Espera um minuto antes de pedir outro.'
+            : authError.message
+        );
       } else {
         setSent(true);
       }
@@ -94,9 +115,9 @@ function LoginForm() {
               />
             </div>
 
-            {error && (
+            {(error ?? linkError) && (
               <div className="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-800">
-                {error}
+                {error ?? linkError}
               </div>
             )}
 
@@ -110,6 +131,12 @@ function LoginForm() {
 
             <p className="text-center text-xs text-neutral-400">
               Vais receber um link no email. Sem palavra-passe.
+            </p>
+            <p className="text-center text-xs text-neutral-500">
+              Ainda não tens acesso?{' '}
+              <Link href="/pedir-acesso" className="font-medium text-neutral-900 underline">
+                Pedir acesso
+              </Link>
             </p>
           </form>
         )}

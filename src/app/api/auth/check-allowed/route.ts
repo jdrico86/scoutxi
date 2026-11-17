@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   if (!data) {
     return NextResponse.json(
-      { error: 'Email não autorizado. Pede acesso ao administrador.' },
+      { error: 'Este email ainda não tem acesso. Podes pedi-lo em baixo.' },
       { status: 403 }
     );
   }
